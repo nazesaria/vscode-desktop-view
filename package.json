@@ -1,0 +1,218 @@
+{
+  "name": "desktop-view",
+  "displayName": "Desktop View",
+  "description": "GitHub Desktop style history, changes and pull request viewer for the repositories in your workspace.",
+  "version": "0.1.0",
+  "publisher": "nazesaria",
+  "license": "MIT",
+  "private": true,
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "SCM Providers",
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished",
+    "onWebviewPanel:desktopView"
+  ],
+  "extensionDependencies": [
+    "vscode.git"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "desktopView.open",
+        "title": "Open Repository...",
+        "category": "Desktop View",
+        "icon": "$(git-commit)"
+      },
+      {
+        "command": "desktopView.openCurrent",
+        "title": "Open Current Repository",
+        "category": "Desktop View",
+        "icon": "$(git-commit)"
+      },
+      {
+        "command": "desktopView.openScmRepository",
+        "title": "Open in Desktop View",
+        "category": "Desktop View",
+        "icon": "$(git-commit)"
+      },
+      {
+        "command": "desktopView.signInGitHub",
+        "title": "Sign in to GitHub",
+        "category": "Desktop View"
+      },
+      {
+        "command": "desktopView.ctx.copySha",
+        "title": "Copy SHA",
+        "category": "Desktop View"
+      },
+      {
+        "command": "desktopView.ctx.openCommitOnGitHub",
+        "title": "View on GitHub",
+        "category": "Desktop View"
+      },
+      {
+        "command": "desktopView.ctx.copyPath",
+        "title": "Copy File Path",
+        "category": "Desktop View"
+      },
+      {
+        "command": "desktopView.ctx.openFile",
+        "title": "Open File",
+        "category": "Desktop View"
+      },
+      {
+        "command": "desktopView.ctx.openDiffInEditor",
+        "title": "Open Diff in Editor",
+        "category": "Desktop View"
+      },
+      {
+        "command": "desktopView.ctx.revealInExplorer",
+        "title": "Reveal in Explorer View",
+        "category": "Desktop View"
+      },
+      {
+        "command": "desktopView.ctx.openPullRequestOnGitHub",
+        "title": "View Pull Request on GitHub",
+        "category": "Desktop View"
+      }
+    ],
+    "menus": {
+      "scm/title": [
+        {
+          "command": "desktopView.openCurrent",
+          "when": "scmProvider == git",
+          "group": "navigation@100"
+        }
+      ],
+      "scm/sourceControl": [
+        {
+          "command": "desktopView.openScmRepository",
+          "when": "scmProvider == git",
+          "group": "inline"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "desktopView.openScmRepository",
+          "when": "false"
+        },
+        {
+          "command": "desktopView.ctx.copySha",
+          "when": "false"
+        },
+        {
+          "command": "desktopView.ctx.openCommitOnGitHub",
+          "when": "false"
+        },
+        {
+          "command": "desktopView.ctx.copyPath",
+          "when": "false"
+        },
+        {
+          "command": "desktopView.ctx.openFile",
+          "when": "false"
+        },
+        {
+          "command": "desktopView.ctx.openDiffInEditor",
+          "when": "false"
+        },
+        {
+          "command": "desktopView.ctx.revealInExplorer",
+          "when": "false"
+        },
+        {
+          "command": "desktopView.ctx.openPullRequestOnGitHub",
+          "when": "false"
+        }
+      ],
+      "webview/context": [
+        {
+          "command": "desktopView.ctx.copySha",
+          "when": "webviewId == desktopView && webviewSection == commit",
+          "group": "1_copy@1"
+        },
+        {
+          "command": "desktopView.ctx.openCommitOnGitHub",
+          "when": "webviewId == desktopView && webviewSection == commit && desktopViewGitHub",
+          "group": "2_open@1"
+        },
+        {
+          "command": "desktopView.ctx.openFile",
+          "when": "webviewId == desktopView && webviewSection == file && desktopViewLocalFile",
+          "group": "2_open@1"
+        },
+        {
+          "command": "desktopView.ctx.openDiffInEditor",
+          "when": "webviewId == desktopView && webviewSection == file",
+          "group": "2_open@2"
+        },
+        {
+          "command": "desktopView.ctx.revealInExplorer",
+          "when": "webviewId == desktopView && webviewSection == file && desktopViewLocalFile",
+          "group": "2_open@3"
+        },
+        {
+          "command": "desktopView.ctx.copyPath",
+          "when": "webviewId == desktopView && webviewSection == file",
+          "group": "1_copy@1"
+        },
+        {
+          "command": "desktopView.ctx.openPullRequestOnGitHub",
+          "when": "webviewId == desktopView && webviewSection == pullRequest",
+          "group": "2_open@1"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "desktopView.openCurrent",
+        "key": "ctrl+alt+h",
+        "mac": "cmd+alt+h"
+      }
+    ],
+    "configuration": {
+      "title": "Desktop View",
+      "properties": {
+        "desktopView.historyPageSize": {
+          "type": "number",
+          "default": 100,
+          "description": "How many commits to load at a time in the History tab."
+        },
+        "desktopView.diffContextLines": {
+          "type": "number",
+          "default": 3,
+          "description": "Context lines around each change in local diffs."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit -p . && tsc --noEmit -p webview",
+    "test": "node esbuild.mjs --tests && node --test out-test/",
+    "package": "npm run typecheck && node esbuild.mjs --production && vsce package --no-dependencies --allow-missing-repository -o desktop-view.vsix"
+  },
+  "devDependencies": {
+    "@types/node": "^18.19.130",
+    "@types/react": "18.3",
+    "@types/react-dom": "18.3",
+    "@types/vscode": "1.90",
+    "@vscode/codicons": "^0.0.36",
+    "@vscode/vsce": "^2.32.0",
+    "esbuild": "^0.24.2",
+    "highlight.js": "11.10",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "5.6"
+  },
+  "overrides": {
+    "cheerio": "1.0.0-rc.12"
+  }
+}

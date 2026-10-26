@@ -46,14 +46,46 @@ export function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, c => escapes[c])
 }
 
-/** Highlights a single line. Multi-line constructs (block comments) are best effort. */
-export function highlightLine(text: string, language: string | undefined): string {
-  if (!language || text.length > 1000) {
-    return escapeHtml(text)
+/** Highlighting a block costs roughly linear time; past this, fall back to escaping. */
+const MaxBlockChars = 400_000
+
+/**
+ * Highlights consecutive lines as one block, so constructs spanning lines
+ * (block comments, long strings) are coloured correctly, then splits the
+ * HTML back into one string per line, re-opening the spans cut at each newline.
+ */
+export function highlightLines(lines: ReadonlyArray<string>, language: string | undefined): string[] {
+  const text = lines.join('\n')
+  if (!language || text.length > MaxBlockChars) {
+    return lines.map(escapeHtml)
   }
+  let html: string
   try {
-    return hljs.highlight(text, { language, ignoreIllegals: true }).value
+    html = hljs.highlight(text, { language, ignoreIllegals: true }).value
   } catch {
-    return escapeHtml(text)
+    return lines.map(escapeHtml)
   }
+  return splitHighlighted(html)
+}
+
+export function splitHighlighted(html: string): string[] {
+  const result: string[] = []
+  const open: string[] = []
+  let current = ''
+  for (const [token] of html.matchAll(/<span[^>]*>|<\/span>|\n|[^<\n]+/g)) {
+    if (token === '\n') {
+      result.push(current + '</span>'.repeat(open.length))
+      current = open.join('')
+    } else if (token === '</span>') {
+      open.pop()
+      current += token
+    } else if (token.startsWith('<span')) {
+      open.push(token)
+      current += token
+    } else {
+      current += token
+    }
+  }
+  result.push(current + '</span>'.repeat(open.length))
+  return result
 }

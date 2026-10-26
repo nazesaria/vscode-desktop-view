@@ -14,6 +14,12 @@ interface ListProps<T> {
   emptyText?: React.ReactNode
   className?: string
   ariaLabel: string
+  /**
+   * Enables multi-selection (Ctrl/Cmd+click, Shift+click, Shift+arrows).
+   * `selectedKey` is then the focused item among these.
+   */
+  multiSelectedKeys?: ReadonlyArray<string>
+  onMultiSelect?: (items: T[], focus: T) => void
 }
 
 /**
@@ -23,10 +29,45 @@ interface ListProps<T> {
 export function List<T>(props: ListProps<T>) {
   const { items, getKey, selectedKey, onSelect } = props
   const containerRef = useRef<HTMLDivElement>(null)
+  const anchor = useRef<string | null>(null)
   const selectedIndex = selectedKey === null ? -1 : items.findIndex(i => getKey(i) === selectedKey)
+  const multi = props.onMultiSelect !== undefined
+  const selectedSet = new Set(props.multiSelectedKeys ?? (selectedKey === null ? [] : [selectedKey]))
+
+  const selectSingle = (item: T) => {
+    anchor.current = getKey(item)
+    onSelect(item)
+  }
+  const selectRange = (to: number) => {
+    const anchorIndex = Math.max(0, items.findIndex(i => getKey(i) === (anchor.current ?? selectedKey)))
+    const [a, b] = anchorIndex <= to ? [anchorIndex, to] : [to, anchorIndex]
+    props.onMultiSelect!(items.slice(a, b + 1), items[to])
+  }
+  const onRowMouseDown = (e: React.MouseEvent, item: T, index: number) => {
+    if (multi && e.shiftKey) {
+      e.preventDefault()
+      selectRange(index)
+    } else if (multi && (e.ctrlKey || e.metaKey)) {
+      const key = getKey(item)
+      const keys = new Set(selectedSet)
+      if (keys.has(key)) {
+        keys.delete(key)
+      } else {
+        keys.add(key)
+      }
+      const chosen = items.filter(i => keys.has(getKey(i)))
+      if (chosen.length > 0) {
+        anchor.current = key
+        props.onMultiSelect!(chosen, keys.has(key) ? item : chosen[0])
+      }
+    } else if (e.button === 0 || !selectedSet.has(getKey(item))) {
+      // A right click on a selected row keeps the selection for the context menu.
+      selectSingle(item)
+    }
+  }
 
   useEffect(() => {
-    const el = containerRef.current?.querySelector<HTMLElement>('[aria-selected="true"]')
+    const el = containerRef.current?.querySelector<HTMLElement>('[data-focused="true"]')
     el?.scrollIntoView({ block: 'nearest' })
   }, [selectedKey])
 
@@ -66,7 +107,11 @@ export function List<T>(props: ListProps<T>) {
     }
     e.preventDefault()
     if (next !== selectedIndex && next >= 0) {
-      onSelect(items[next])
+      if (multi && e.shiftKey) {
+        selectRange(next)
+      } else {
+        selectSingle(items[next])
+      }
     }
   }
 
@@ -88,17 +133,18 @@ export function List<T>(props: ListProps<T>) {
       onScroll={onScroll}
     >
       {items.length === 0 && props.emptyText ? <div className="list-empty">{props.emptyText}</div> : null}
-      {items.map(item => {
+      {items.map((item, index) => {
         const key = getKey(item)
-        const selected = key === selectedKey
+        const selected = selectedSet.has(key)
         const context = props.getContext?.(item)
         return (
           <div
             key={key}
             role="option"
             aria-selected={selected}
+            data-focused={key === selectedKey}
             className={`list-row ${props.rowClassName ?? ''} ${selected ? 'selected' : ''}`}
-            onMouseDown={() => onSelect(item)}
+            onMouseDown={e => onRowMouseDown(e, item, index)}
             onDoubleClick={() => props.onActivate?.(item)}
             data-vscode-context={
               context ? JSON.stringify({ ...context, preventDefaultContextMenuItems: true }) : undefined

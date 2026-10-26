@@ -33,6 +33,8 @@ export interface PersistedState {
   split?: boolean
   hideWhitespace?: boolean
   prState?: 'open' | 'closed'
+  commitSummary?: string
+  commitDescription?: string
 }
 
 export function loadState(): PersistedState {

@@ -1,7 +1,15 @@
 import * as path from 'path'
 import * as vscode from 'vscode'
 import { GitHubClient } from './github'
-import { DesktopViewPanel, openDiffInEditor, PanelDeps, ViewType } from './panel'
+import { getWorkingChanges } from './git'
+import {
+  checkoutPullRequestWithProgress,
+  DesktopViewPanel,
+  discardChanges,
+  openDiffInEditor,
+  PanelDeps,
+  ViewType,
+} from './panel'
 import { ChangedFile, DiffSource } from './protocol'
 import { RepoRegistry } from './repos'
 
@@ -12,6 +20,7 @@ interface WebviewContextArgs {
   url?: string
   path?: string
   diff?: string
+  number?: number
 }
 
 export async function activate(context: vscode.ExtensionContext) {
@@ -96,6 +105,27 @@ export async function activate(context: vscode.ExtensionContext) {
     if (a.root && a.diff) {
       const { source, file } = JSON.parse(a.diff) as { source: DiffSource; file: ChangedFile }
       return openDiffInEditor(deps, a.root, source, file)
+    }
+  })
+
+  command('desktopView.ctx.discard', async (a: WebviewContextArgs) => {
+    if (a.root && a.diff) {
+      const { file } = JSON.parse(a.diff) as { file: ChangedFile }
+      await discardChanges(a.root, [file])
+    }
+  })
+  command('desktopView.ctx.discardAll', async (a: WebviewContextArgs) => {
+    if (a.root) {
+      await discardChanges(a.root, await getWorkingChanges(a.root))
+    }
+  })
+  command('desktopView.ctx.checkoutPullRequest', async (a: WebviewContextArgs) => {
+    if (a.root && a.number !== undefined) {
+      try {
+        await checkoutPullRequestWithProgress(deps, a.root, a.number)
+      } catch (e) {
+        void vscode.window.showErrorMessage(e instanceof Error ? e.message : String(e))
+      }
     }
   })
 

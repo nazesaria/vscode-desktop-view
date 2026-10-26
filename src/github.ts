@@ -131,6 +131,28 @@ export class GitHubClient {
     return { pr, commits, files }
   }
 
+  /** Raw file contents at a commit, or null when GitHub has none (deleted, binary, too big). */
+  async getFileContent(repo: GitHubRepoRef, ref: string, path: string): Promise<string | null> {
+    const headers: Record<string, string> = {
+      Accept: 'application/vnd.github.raw',
+      'X-GitHub-Api-Version': '2022-11-28',
+      'User-Agent': 'vscode-desktop-view',
+    }
+    if (this.token) {
+      headers.Authorization = `Bearer ${this.token}`
+    }
+    const encoded = path.split('/').map(encodeURIComponent).join('/')
+    const response = await fetch(
+      `${ApiBase}/repos/${repo.owner}/${repo.name}/contents/${encoded}?ref=${encodeURIComponent(ref)}`,
+      { headers }
+    )
+    if (!response.ok) {
+      return null
+    }
+    const text = await response.text()
+    return text.includes('\0') ? null : text
+  }
+
   async getCommitFiles(repo: GitHubRepoRef, sha: string): Promise<ChangedFile[]> {
     const { data } = await this.request<{ files?: ApiFile[] }>(
       `/repos/${repo.owner}/${repo.name}/commits/${sha}`
@@ -155,8 +177,8 @@ interface ApiPullRequest {
   state: 'open' | 'closed'
   draft?: boolean
   merged_at: string | null
-  head: { ref: string; sha: string; label: string }
-  base: { ref: string; sha: string }
+  head: { ref: string; sha: string; label: string; repo: { full_name: string } | null }
+  base: { ref: string; sha: string; repo: { full_name: string } }
   created_at: string
   updated_at: string
   html_url: string
@@ -194,6 +216,9 @@ function toPullRequest(pr: ApiPullRequest): PullRequestSummary {
     state: pr.merged_at ? 'merged' : pr.state,
     draft: pr.draft === true,
     headRef: pr.head.label || pr.head.ref,
+    headBranch: pr.head.ref,
+    // A deleted fork has no repo; its branch can only be reached through refs/pull.
+    fromFork: pr.head.repo?.full_name !== pr.base.repo.full_name,
     baseRef: pr.base.ref,
     headSha: pr.head.sha,
     createdAt: Date.parse(pr.created_at),

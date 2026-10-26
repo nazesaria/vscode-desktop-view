@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import * as assert from 'node:assert/strict'
-import { parseDiff, toSplitRows } from '../src/diff-parser'
+import { parseDiff } from '../src/diff-parser'
 
 const sample = `diff --git a/a.txt b/a.txt
 index 1111111..2222222 100644
@@ -51,13 +51,25 @@ test('detects binary diffs', () => {
   assert.equal(parseDiff('diff --git a/x b/x\nBinary files a/x and b/x differ\n').binary, true)
 })
 
-test('pairs deletes and adds in split rows', () => {
-  const rows = toSplitRows(parseDiff(sample).hunks)
-  const changed = rows.filter(r => r.kind === 'line' && (r.left?.kind === 'delete' || r.right?.kind === 'add'))
-  assert.equal(changed.length, 3)
-  assert.equal(changed[0].left?.text, 'two')
-  assert.equal(changed[0].right?.text, 'TWO')
-  assert.equal(changed[1].left, null)
-  assert.equal(changed[2].left?.text, 'ten')
-  assert.equal(changed[2].right, null)
+import { buildPartialPatch, diffGaps } from '../src/diff-parser'
+
+test('partial patch with nothing selected is null', () => {
+  const d = parseDiff('@@ -1 +1 @@\n-a\n+b\n')
+  assert.equal(buildPartialPatch('x', d.hunks, new Set(['0:1', '0:2']), false), null)
+})
+
+test('partial patch keeps CRLF line endings', () => {
+  const d = parseDiff('@@ -1,2 +1,2 @@\r\n a\r\n-b\r\n+c\r\n')
+  const patch = buildPartialPatch('x', d.hunks, new Set(), false)!
+  assert.match(patch, / a\r\n-b\r\n\+c\r\n$/)
+})
+
+test('gaps between hunks and up to the end of file', () => {
+  const d = parseDiff('@@ -5,3 +5,4 @@\n a\n+n\n b\n c\n@@ -20,2 +21,2 @@\n x\n-y\n+z\n')
+  const gaps = diffGaps(d.hunks, 30)
+  assert.deepEqual(gaps, [
+    { newFirst: 1, newLast: 4, delta: 0 },
+    { newFirst: 9, newLast: 20, delta: 1 },
+    { newFirst: 23, newLast: 30, delta: 1 },
+  ])
 })

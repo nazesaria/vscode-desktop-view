@@ -1,17 +1,23 @@
 import * as path from 'path'
 import * as vscode from 'vscode'
 import {
+  canUndoLastCommit,
+  checkoutPullRequest,
   commitBase,
+  commitChanges,
   commitExists,
   EmptyTreeSha,
   getBranches,
   getCommitDiff,
   getCommitFiles,
+  getFileContent,
   getHeadSha,
   getHistory,
   getWorkingChanges,
   getWorkingDiff,
   mergeBase,
+  restoreToHead,
+  undoLastCommit,
 } from './git'
 import { GitHubClient } from './github'
 import { ChangedFile, DiffSource, HostToWebview, RepoInfo, WebviewToHost } from './protocol'
@@ -105,7 +111,7 @@ export class DesktopViewPanel implements vscode.Disposable {
       const head = await getHeadSha(this.root)
       const headChanged = head !== this.lastHead
       this.lastHead = head
-      this.post({ type: 'repoChanged', headChanged })
+      this.post({ type: 'repoChanged', headChanged, head })
       if (headChanged) {
         await this.sendRepos()
       }
@@ -188,8 +194,8 @@ export class DesktopViewPanel implements vscode.Disposable {
         return
       }
       case 'loadCommitFiles': {
-        const files = await getCommitFiles(root, message.sha)
-        this.post({ type: 'commitFiles', sha: message.sha, files })
+        const files = await getCommitFiles(root, message.sha, message.oldestSha)
+        this.post({ type: 'commitFiles', sha: message.sha, oldestSha: message.oldestSha, files })
         return
       }
       case 'loadChanges': {
@@ -202,7 +208,7 @@ export class DesktopViewPanel implements vscode.Disposable {
         const { context } = this.config()
         let result
         if (source.kind === 'commit') {
-          result = await getCommitDiff(root, source.sha, file, context, hideWhitespace)
+          result = await getCommitDiff(root, source.sha, file, context, hideWhitespace, source.oldestSha)
         } else if (source.kind === 'working') {
           result = await getWorkingDiff(root, file, context, hideWhitespace)
         } else {
@@ -244,6 +250,48 @@ export class DesktopViewPanel implements vscode.Disposable {
         await this.deps.github.refreshSession(true)
         return
       }
+      case 'loadFileContent': {
+        let text: string | null = null
+        try {
+          text = await getFileContent(root, message.ref, message.path)
+        } catch {
+          // Not available locally (e.g. a pull request that was never fetched).
+          const repo = await this.currentRepo()
+          if (repo.github && message.ref) {
+            text = await this.deps.github.getFileContent(repo.github, message.ref, message.path)
+          }
+        }
+        this.post({ type: 'fileContent', requestId: message.requestId, text })
+        return
+      }
+      case 'commit': {
+        try {
+          const text = message.description.trim()
+            ? `${message.summary.trim()}\n\n${message.description.trim()}\n`
+            : `${message.summary.trim()}\n`
+          const sha = await commitChanges(root, text, message.entries)
+          this.post({ type: 'committed', sha, summary: message.summary.trim(), canUndo: await canUndoLastCommit(root) })
+        } finally {
+          this.post({ type: 'commitDone' })
+          this.scheduleRefresh()
+        }
+        return
+      }
+      case 'undoLastCommit': {
+        const { summary, description } = await undoLastCommit(root)
+        this.post({ type: 'undone', summary, description })
+        this.scheduleRefresh()
+        return
+      }
+      case 'discard':
+        if (await discardChanges(root, message.files)) {
+          this.scheduleRefresh()
+        }
+        return
+      case 'checkoutPullRequest':
+        await checkoutPullRequestWithProgress(this.deps, root, message.number)
+        this.scheduleRefresh()
+        return
       case 'openDiffInEditor':
         await openDiffInEditor(this.deps, root, message.source, message.file)
         return
@@ -334,8 +382,8 @@ export async function openDiffInEditor(deps: PanelDeps, root: string, source: Di
         )
         return
       }
-      base = await commitBase(root, head)
-      label = title(head.slice(0, 7))
+      base = await commitBase(root, source.kind === 'commit' ? source.oldestSha ?? head : head)
+      label = title(source.kind === 'commit' && source.oldestSha ? `${source.oldestSha.slice(0, 7)}..${head.slice(0, 7)}` : head.slice(0, 7))
     } else {
       const repo = await deps.repos.describe(root)
       if (!repo.github) {
@@ -371,4 +419,63 @@ export async function openDiffInEditor(deps: PanelDeps, root: string, source: Di
     return
   }
   await vscode.commands.executeCommand('vscode.diff', left, right, label, { preview: true })
+}
+
+/**
+ * Discards local changes after confirmation. Current contents go to the trash
+ * first (like GitHub Desktop), so a mistaken discard can be recovered.
+ * Returns whether anything was discarded.
+ */
+export async function discardChanges(root: string, files: ReadonlyArray<ChangedFile>): Promise<boolean> {
+  const discardable = files.filter(f => f.status !== 'conflicted')
+  if (discardable.length === 0) {
+    void vscode.window.showWarningMessage('Conflicted files cannot be discarded here. Resolve the conflict first.')
+    return false
+  }
+  const names = discardable.map(f => f.path)
+  const detail =
+    (names.length <= 10 ? names.join('\n') : `${names.slice(0, 10).join('\n')}\n…and ${names.length - 10} more`) +
+    '\n\nThe current contents will be moved to the trash.'
+  const choice = await vscode.window.showWarningMessage(
+    discardable.length === 1
+      ? `Discard all changes to ${path.basename(discardable[0].path)}?`
+      : `Discard changes to ${discardable.length} files?`,
+    { modal: true, detail },
+    'Discard Changes'
+  )
+  if (choice !== 'Discard Changes') {
+    return false
+  }
+
+  const trashed: ChangedFile[] = []
+  try {
+    for (const file of discardable) {
+      if (file.status !== 'deleted') {
+        await vscode.workspace.fs.delete(vscode.Uri.file(path.join(root, file.path)), { useTrash: true })
+      }
+      trashed.push(file)
+    }
+  } finally {
+    // Even after a failure, restore what was already trashed so tracked files don't look deleted.
+    await restoreToHead(root, trashed)
+  }
+  return true
+}
+
+export async function checkoutPullRequestWithProgress(deps: PanelDeps, root: string, number: number) {
+  const repo = await deps.repos.describe(root)
+  if (!repo.github) {
+    return
+  }
+  const { pr } = await deps.github.getPullRequest(repo.github, number)
+  const branch = await vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Notification, title: `Checking out pull request #${number}…` },
+    () =>
+      checkoutPullRequest(root, repo.github!.remote ?? 'origin', {
+        number,
+        headBranch: pr.headBranch,
+        fromFork: pr.fromFork,
+      })
+  )
+  vscode.window.setStatusBarMessage(`Checked out ${branch}`, 4000)
 }

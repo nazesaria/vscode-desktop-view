@@ -74,8 +74,9 @@ export function PullRequestStateBadge(props: { pr: PullRequestSummary }) {
   return <Icon name={icon} className={`pr-state pr-${state}`} title={state} />
 }
 
-export function PullRequestHeader(props: { pr: PullRequestSummary; commitCount: number }) {
+export function PullRequestHeader(props: { pr: PullRequestSummary; commitCount: number; currentBranch: string | null }) {
   const { pr } = props
+  const checkedOut = props.currentBranch === (pr.fromFork ? `pr/${pr.number}` : pr.headBranch)
   return (
     <div className="details-header">
       <div className="header-title">
@@ -84,6 +85,21 @@ export function PullRequestHeader(props: { pr: PullRequestSummary; commitCount: 
           {pr.title} <span className="pr-number">#{pr.number}</span>
         </span>
         <span className="spacer" />
+        {pr.state === 'open' ? (
+          checkedOut ? (
+            <span className="checked-out" title="This pull request is the current branch">
+              <Icon name="check" /> Checked out
+            </span>
+          ) : (
+            <button
+              className="secondary-button"
+              title={`Fetch and check out ${pr.fromFork ? `pr/${pr.number}` : pr.headBranch}`}
+              onClick={() => post({ type: 'checkoutPullRequest', number: pr.number })}
+            >
+              <Icon name="git-branch" /> Checkout
+            </button>
+          )
+        ) : null}
         <IconButton icon="link-external" title="View on GitHub" onClick={() => post({ type: 'openExternal', url: pr.url })} />
       </div>
       {/* PR templates leave HTML comments behind that GitHub hides when rendering. */}
@@ -105,6 +121,39 @@ export function PullRequestHeader(props: { pr: PullRequestSummary; commitCount: 
           <Icon name="git-commit" /> {props.commitCount}
         </span>
         <Stats additions={pr.additions} deletions={pr.deletions} />
+      </div>
+    </div>
+  )
+}
+
+/** Header for a range of selected commits, like GitHub Desktop's multi-commit diff. */
+export function MultiCommitHeader(props: {
+  commits: ReadonlyArray<CommitSummary>
+  files: ReadonlyArray<ChangedFile> | null
+  repo: RepoInfo
+  contiguous: boolean
+}) {
+  const { commits, repo } = props
+  const newest = commits[0]
+  const oldest = commits[commits.length - 1]
+  const authors = [...new Map(commits.map(c => [c.authorEmail || c.authorName, c])).values()]
+  return (
+    <div className="details-header">
+      <div className="header-title">{commits.length} commits selected</div>
+      <div className="header-meta">
+        <span className="meta-item">
+          {authors.slice(0, 5).map(c => (
+            <Avatar key={c.sha} url={commitAvatar(c, repo)} name={c.authorName} />
+          ))}
+          {authors.length === 1 ? authors[0].authorName : `${authors.length} authors`}
+        </span>
+        {props.contiguous ? (
+          <span className="meta-item sha" title={`${oldest.sha}^..${newest.sha}`}>
+            <Icon name="git-commit" />
+            {oldest.shortSha}..{newest.shortSha}
+          </span>
+        ) : null}
+        <Stats {...sumStats(props.files)} />
       </div>
     </div>
   )

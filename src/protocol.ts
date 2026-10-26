@@ -11,6 +11,8 @@ export interface RepoInfo {
 export interface GitHubRepoRef {
   owner: string
   name: string
+  /** Name of the local remote pointing at this repository. */
+  remote?: string
 }
 
 export interface CommitSummary {
@@ -57,7 +59,11 @@ export interface PullRequestSummary {
   avatarUrl: string
   state: 'open' | 'closed' | 'merged'
   draft: boolean
+  /** Display label of the head, `owner:branch` for forks. */
   headRef: string
+  /** Branch name in the head repository. */
+  headBranch: string
+  fromFork: boolean
   baseRef: string
   headSha: string
   createdAt: number
@@ -70,7 +76,8 @@ export interface PullRequestSummary {
 
 /** Where a diff is coming from. */
 export type DiffSource =
-  | { kind: 'commit'; sha: string }
+  /** A commit, or the range oldestSha^..sha when several commits are selected. */
+  | { kind: 'commit'; sha: string; oldestSha?: string }
   | { kind: 'working' }
   | { kind: 'pr'; number: number }
   | { kind: 'prCommit'; number: number; sha: string }
@@ -95,15 +102,27 @@ export interface DiffResult {
 // ---------------------------------------------------------------------------
 // Messages
 
+/** A file to commit; with `patch`, only those lines (selected in the diff) are committed. */
+export interface CommitEntry {
+  file: ChangedFile
+  patch?: string
+}
+
 export type WebviewToHost =
   | { type: 'ready' }
   | { type: 'switchRepo'; root: string }
   | { type: 'openRepoInNewTab'; root: string }
   | { type: 'loadHistory'; skip: number; compare?: { branch: string; mode: BranchCompareMode } }
   | { type: 'loadBranches' }
-  | { type: 'loadCommitFiles'; sha: string }
+  | { type: 'loadCommitFiles'; sha: string; oldestSha?: string }
   | { type: 'loadChanges' }
   | { type: 'loadDiff'; requestId: number; request: DiffRequest }
+  /** Full text of a file, used to expand diff context. `ref` null reads the working tree. */
+  | { type: 'loadFileContent'; requestId: number; ref: string | null; path: string }
+  | { type: 'commit'; summary: string; description: string; entries: CommitEntry[] }
+  | { type: 'discard'; files: ChangedFile[] }
+  | { type: 'undoLastCommit' }
+  | { type: 'checkoutPullRequest'; number: number }
   | { type: 'loadPullRequests'; state: 'open' | 'closed'; page: number }
   | { type: 'loadPullRequest'; number: number }
   | { type: 'loadPullRequestCommitFiles'; number: number; sha: string }
@@ -118,9 +137,14 @@ export type HostToWebview =
   | { type: 'repos'; repos: RepoInfo[]; current: RepoInfo }
   | { type: 'history'; skip: number; commits: CommitSummary[]; hasMore: boolean; compareKey: string }
   | { type: 'branches'; branches: string[]; current: string | null }
-  | { type: 'commitFiles'; sha: string; files: ChangedFile[] }
+  | { type: 'commitFiles'; sha: string; oldestSha?: string; files: ChangedFile[] }
   | { type: 'changes'; files: ChangedFile[] }
   | { type: 'diff'; requestId: number; result: DiffResult }
+  | { type: 'fileContent'; requestId: number; text: string | null }
+  | { type: 'committed'; sha: string; summary: string; canUndo: boolean }
+  | { type: 'undone'; summary: string; description: string }
+  /** The commit form should be enabled again (the commit failed or finished). */
+  | { type: 'commitDone' }
   | { type: 'pullRequests'; state: 'open' | 'closed'; page: number; items: PullRequestSummary[]; hasMore: boolean }
   | {
       type: 'pullRequest'
@@ -132,5 +156,5 @@ export type HostToWebview =
   | { type: 'pullRequestCommitFiles'; number: number; sha: string; files: ChangedFile[] }
   | { type: 'githubAuth'; signedIn: boolean }
   /** Local repository changed on disk (status/HEAD). */
-  | { type: 'repoChanged'; headChanged: boolean }
+  | { type: 'repoChanged'; headChanged: boolean; head: string | null }
   | { type: 'error'; scope: string; message: string; requestId?: number }

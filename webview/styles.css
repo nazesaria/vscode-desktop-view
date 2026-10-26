@@ -1106,3 +1106,203 @@ body.vscode-light .hljs-name,
 body.vscode-light .hljs-tag {
   color: #116329;
 }
+
+/* ---------------------------------------------------------------- commit (Changes tab) */
+
+.pane-header.with-check {
+  justify-content: flex-start;
+  padding-left: 10px;
+}
+
+.pane-header.with-check .pane-header-text {
+  flex: 1;
+  text-align: center;
+  margin-right: 22px;
+}
+
+.file-check,
+.hunk-check {
+  margin: 0;
+  flex-shrink: 0;
+  accent-color: var(--vscode-button-background);
+  cursor: pointer;
+}
+
+.hunk-check {
+  margin-right: 8px;
+  vertical-align: middle;
+}
+
+.commit-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 8px;
+  border-top: 1px solid var(--dv-border);
+}
+
+.commit-summary {
+  position: relative;
+  display: flex;
+}
+
+.commit-summary input {
+  flex: 1;
+  height: 28px;
+  padding: 0 8px;
+}
+
+.summary-warning {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  color: var(--vscode-editorWarning-foreground, #cca700);
+}
+
+.commit-box textarea {
+  font: inherit;
+  color: var(--vscode-input-foreground);
+  background: var(--dv-input-bg);
+  border: 1px solid var(--dv-input-border);
+  border-radius: 3px;
+  padding: 6px 8px;
+  resize: vertical;
+  min-height: 60px;
+  outline: none;
+}
+
+.commit-box textarea:focus {
+  border-color: var(--dv-focus);
+}
+
+.commit-button {
+  height: 28px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.primary-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.secondary-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--vscode-button-border, var(--dv-input-border));
+  border-radius: 3px;
+  padding: 3px 10px;
+  background: var(--vscode-button-secondaryBackground, transparent);
+  color: var(--vscode-button-secondaryForeground, var(--dv-fg));
+  cursor: pointer;
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: normal;
+}
+
+.secondary-button:hover {
+  background: var(--vscode-button-secondaryHoverBackground, var(--dv-hover-bg));
+}
+
+.undo-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-top: 1px solid var(--dv-border);
+}
+
+.undo-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.undo-label {
+  font-size: 11px;
+  color: var(--dv-fg-muted);
+}
+
+.checked-out {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: normal;
+  color: var(--vscode-charts-green, #3fb950);
+}
+
+/* ---------------------------------------------------------------- line selection */
+
+.diff-note {
+  padding: 4px 10px;
+  font-size: 11px;
+  color: var(--dv-fg-muted);
+  border-bottom: 1px solid var(--dv-border);
+}
+
+.diff-table .selectable.ln,
+.diff-table tr.selectable .ln,
+.diff-table tr.selectable .marker {
+  cursor: pointer;
+}
+
+/* Included lines get a highlighted gutter, as in GitHub Desktop. */
+.diff-table tr.selectable.included .ln,
+.diff-table tr.selectable.included .marker,
+.diff-table .ln.selectable.included {
+  background: color-mix(in srgb, var(--dv-focus) 45%, transparent);
+  color: var(--vscode-button-foreground, #fff);
+}
+
+.diff-table tr.selectable.excluded .code,
+.diff-table tr.selectable.excluded .marker,
+.diff-table .code.selectable.excluded {
+  background: transparent;
+  opacity: 0.55;
+}
+
+.diff-table tr.selectable.excluded .ln,
+.diff-table .ln.selectable.excluded {
+  background: var(--diff-gutter-bg);
+}
+
+.diff-table tr.selectable:hover .ln,
+.diff-table .ln.selectable:hover {
+  outline: 1px solid var(--dv-focus);
+  outline-offset: -1px;
+}
+
+/* ---------------------------------------------------------------- context expansion */
+
+.diff-table .ln.expander {
+  padding: 0;
+  text-align: center;
+}
+
+.expand-buttons {
+  display: inline-flex;
+}
+
+.expand-button-gutter {
+  border: none;
+  background: transparent;
+  color: var(--dv-fg-muted);
+  cursor: pointer;
+  padding: 0 6px;
+  height: 20px;
+  line-height: 20px;
+}
+
+.expand-button-gutter:hover {
+  color: var(--dv-fg);
+  background: color-mix(in srgb, var(--dv-focus) 35%, transparent);
+}
+
+.line.revealed .code {
+  color: var(--dv-fg);
+}

@@ -2,7 +2,7 @@
   "name": "desktop-view",
   "displayName": "Desktop View",
   "description": "GitHub Desktop style history, changes and pull request viewer for the repositories in your workspace.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "nazesaria",
   "license": "MIT",
   "private": true,
@@ -80,6 +80,21 @@
         "command": "desktopView.ctx.openPullRequestOnGitHub",
         "title": "View Pull Request on GitHub",
         "category": "Desktop View"
+      },
+      {
+        "command": "desktopView.ctx.discard",
+        "title": "Discard Changes...",
+        "category": "Desktop View"
+      },
+      {
+        "command": "desktopView.ctx.discardAll",
+        "title": "Discard All Changes...",
+        "category": "Desktop View"
+      },
+      {
+        "command": "desktopView.ctx.checkoutPullRequest",
+        "title": "Checkout Pull Request",
+        "category": "Desktop View"
       }
     ],
     "menus": {
@@ -129,6 +144,18 @@
         {
           "command": "desktopView.ctx.openPullRequestOnGitHub",
           "when": "false"
+        },
+        {
+          "command": "desktopView.ctx.discard",
+          "when": "false"
+        },
+        {
+          "command": "desktopView.ctx.discardAll",
+          "when": "false"
+        },
+        {
+          "command": "desktopView.ctx.checkoutPullRequest",
+          "when": "false"
         }
       ],
       "webview/context": [
@@ -166,6 +193,21 @@
           "command": "desktopView.ctx.openPullRequestOnGitHub",
           "when": "webviewId == desktopView && webviewSection == pullRequest",
           "group": "2_open@1"
+        },
+        {
+          "command": "desktopView.ctx.discard",
+          "when": "webviewId == desktopView && webviewSection == file && desktopViewWorking",
+          "group": "3_discard@1"
+        },
+        {
+          "command": "desktopView.ctx.discardAll",
+          "when": "webviewId == desktopView && (webviewSection == changesHeader || webviewSection == file && desktopViewWorking)",
+          "group": "3_discard@2"
+        },
+        {
+          "command": "desktopView.ctx.checkoutPullRequest",
+          "when": "webviewId == desktopView && webviewSection == pullRequest",
+          "group": "1_checkout@1"
         }
       ]
     },

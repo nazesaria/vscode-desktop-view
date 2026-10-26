@@ -1,16 +1,25 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { buildPartialPatch, DiffHunk, parseDiff, selectableKeys } from '../src/diff-parser'
 import {
   ChangedFile,
+  CommitEntry,
   CommitSummary,
   DiffSource,
   HostToWebview,
   PullRequestSummary,
   RepoInfo,
 } from '../src/protocol'
+import { CommitBox, UndoBar } from './components/CommitBox'
 import { Avatar, Icon, Loading, Placeholder, Resizer } from './components/Common'
-import { DiffOptions, DiffState, DiffView } from './components/DiffView'
-import { FileList } from './components/FileList'
-import { commitAvatar, CommitHeader, PullRequestHeader, PullRequestStateBadge } from './components/Headers'
+import { ContextSource, DiffOptions, DiffState, DiffView, LineSelection } from './components/DiffView'
+import { CheckState, FileChecks, FileList } from './components/FileList'
+import {
+  commitAvatar,
+  CommitHeader,
+  MultiCommitHeader,
+  PullRequestHeader,
+  PullRequestStateBadge,
+} from './components/Headers'
 import { List } from './components/List'
 import { BranchCompare, Toolbar } from './components/Toolbar'
 import { relativeTime } from './format'
@@ -31,6 +40,30 @@ interface DiffTarget {
   file: ChangedFile
 }
 
+/** Lines left out of the next commit for one file, valid for the diff text they were picked on. */
+interface LineExclusion {
+  diffText: string
+  excluded: Set<string>
+}
+
+/** Statuses whose diff can be committed line by line (a patch against HEAD applies cleanly). */
+const LineSelectableStatuses = new Set(['modified', 'untracked', 'added'])
+/** Statuses whose diff hides unchanged lines that can be expanded. */
+const ExpandableStatuses = new Set(['modified', 'renamed', 'typechange', 'copied'])
+
+function splitContent(text: string): string[] {
+  const lines = text.split('\n').map(l => (l.endsWith('\r') ? l.slice(0, -1) : l))
+  if (lines.length > 0 && lines[lines.length - 1] === '') {
+    lines.pop()
+  }
+  return lines
+}
+
+function withoutPatch(file: ChangedFile): ChangedFile {
+  const { patch, ...rest } = file
+  return rest
+}
+
 export function App() {
   const persisted = useMemo(loadState, [])
 
@@ -48,6 +81,12 @@ export function App() {
   // Changes
   const [changes, setChanges] = useState<ChangedFile[] | null>(null)
   const [changePath, setChangePath] = useState<string | null>(null)
+  const [excludedFiles, setExcludedFiles] = useState<ReadonlySet<string>>(new Set())
+  const [lineExclusions, setLineExclusions] = useState<ReadonlyMap<string, LineExclusion>>(new Map())
+  const [summary, setSummaryValue] = useState(persisted.commitSummary ?? '')
+  const [description, setDescriptionValue] = useState(persisted.commitDescription ?? '')
+  const [committing, setCommitting] = useState(false)
+  const [lastCommit, setLastCommit] = useState<{ sha: string; summary: string } | null>(null)
 
   // History
   const [commits, setCommits] = useState<CommitSummary[]>([])
@@ -57,8 +96,10 @@ export function App() {
   const [compareBranch, setCompareBranch] = useState<string | null>(null)
   const [compareMode, setCompareMode] = useState<'behind' | 'ahead'>('behind')
   const [branches, setBranches] = useState<string[] | null>(null)
+  /** Focused commit; with several selected, `selectedShas` holds all of them in list order. */
   const [selectedSha, setSelectedSha] = useState<string | null>(null)
-  const [commitFiles, setCommitFiles] = useState<{ sha: string; files: ChangedFile[] } | null>(null)
+  const [selectedShas, setSelectedShas] = useState<string[]>([])
+  const [commitFiles, setCommitFiles] = useState<{ sha: string; oldestSha?: string; files: ChangedFile[] } | null>(null)
   const [commitFilePath, setCommitFilePath] = useState<string | null>(null)
 
   // Pull requests
@@ -81,17 +122,33 @@ export function App() {
   const [diff, setDiff] = useState<DiffState | null>(null)
   const [diffRefresh, setDiffRefresh] = useState(0)
   const diffRequestId = useRef(0)
+  const [contextLines, setContextLines] = useState<{ key: string; lines: string[] | null } | null>(null)
+  const contentRequest = useRef({ id: 0, key: '' })
 
   // Latest values for the message handler, which is registered once.
-  const live = useRef({ compareKey: '', selectedSha, selectedPr, prCommit, tab, prState, commits })
-  live.current = {
-    compareKey: compareBranch ? `${compareMode}:${compareBranch}` : '',
+  const live = useRef({
+    compareKey: '',
     selectedSha,
+    selectedShas,
+    commitKey: '',
     selectedPr,
     prCommit,
     tab,
     prState,
     commits,
+    lastCommitSha: null as string | null,
+  })
+  live.current = {
+    ...live.current,
+    compareKey: compareBranch ? `${compareMode}:${compareBranch}` : '',
+    selectedSha,
+    selectedShas,
+    selectedPr,
+    prCommit,
+    tab,
+    prState,
+    commits,
+    lastCommitSha: lastCommit?.sha ?? null,
   }
 
   const setTab = (t: Tab) => {
@@ -105,6 +162,14 @@ export function App() {
   const setPrState = (s: 'open' | 'closed') => {
     setPrStateValue(s)
     saveState({ prState: s })
+  }
+  const setSummary = (value: string) => {
+    setSummaryValue(value)
+    saveState({ commitSummary: value })
+  }
+  const setDescription = (value: string) => {
+    setDescriptionValue(value)
+    saveState({ commitDescription: value })
   }
 
   // ---------------------------------------------------------------------------
@@ -130,8 +195,13 @@ export function App() {
     setCompareBranch(null)
     setBranches(null)
     setSelectedSha(null)
+    setSelectedShas([])
     setCommitFiles(null)
     setCommitFilePath(null)
+    setExcludedFiles(new Set())
+    setLineExclusions(new Map())
+    setLastCommit(null)
+    setContextLines(null)
     setPrs([])
     setPrsPage(0)
     setPrsHasMore(false)
@@ -148,6 +218,11 @@ export function App() {
     const dispose = onMessage((m: HostToWebview) => {
       switch (m.type) {
         case 'init':
+          if (loadState().root !== m.current.root) {
+            // Commit message drafts belong to the repository they were written for.
+            setSummary('')
+            setDescription('')
+          }
           resetForRepo()
           setRepos(m.repos)
           setRepo(m.current)
@@ -183,9 +258,29 @@ export function App() {
           setBranches(m.branches)
           return
         case 'commitFiles':
-          if (m.sha === live.current.selectedSha) {
-            setCommitFiles({ sha: m.sha, files: m.files })
+          if (`${m.sha}:${m.oldestSha ?? ''}` === live.current.commitKey) {
+            setCommitFiles({ sha: m.sha, oldestSha: m.oldestSha, files: m.files })
           }
+          return
+        case 'fileContent':
+          if (m.requestId === contentRequest.current.id) {
+            setContextLines({ key: contentRequest.current.key, lines: m.text === null ? null : splitContent(m.text) })
+          }
+          return
+        case 'committed':
+          setSummary('')
+          setDescription('')
+          setExcludedFiles(new Set())
+          setLineExclusions(new Map())
+          setLastCommit(m.canUndo ? { sha: m.sha, summary: m.summary } : null)
+          return
+        case 'commitDone':
+          setCommitting(false)
+          return
+        case 'undone':
+          setSummary(m.summary)
+          setDescription(m.description)
+          setLastCommit(null)
           return
         case 'diff':
           if (m.requestId === diffRequestId.current) {
@@ -218,6 +313,9 @@ export function App() {
           return
         case 'repoChanged':
           post({ type: 'loadChanges' })
+          if (live.current.lastCommitSha && m.head !== live.current.lastCommitSha) {
+            setLastCommit(null)
+          }
           if (m.headChanged) {
             const key = live.current.compareKey
             const [mode, ...branch] = key.split(':')
@@ -301,13 +399,43 @@ export function App() {
   // Selection
 
   function selectCommit(commit: CommitSummary) {
-    if (commit.sha === live.current.selectedSha) {
+    if (commit.sha === live.current.selectedSha && live.current.selectedShas.length <= 1) {
       return
     }
     live.current.selectedSha = commit.sha
+    live.current.selectedShas = [commit.sha]
+    live.current.commitKey = `${commit.sha}:`
     setSelectedSha(commit.sha)
+    setSelectedShas([commit.sha])
     setCommitFiles(null)
     post({ type: 'loadCommitFiles', sha: commit.sha })
+  }
+
+  /** Newest and oldest of the selection, or null when the selected commits are not adjacent. */
+  function commitRange(shas: ReadonlyArray<string>): { newest: string; oldest: string } | null {
+    const indexes = shas.map(sha => commits.findIndex(c => c.sha === sha)).sort((a, b) => a - b)
+    if (indexes.length === 0 || indexes[0] < 0 || indexes[indexes.length - 1] - indexes[0] !== indexes.length - 1) {
+      return null
+    }
+    return { newest: commits[indexes[0]].sha, oldest: commits[indexes[indexes.length - 1]].sha }
+  }
+
+  function selectCommits(items: CommitSummary[], focus: CommitSummary) {
+    if (items.length === 1) {
+      selectCommit(items[0])
+      return
+    }
+    const shas = items.map(c => c.sha)
+    live.current.selectedSha = focus.sha
+    live.current.selectedShas = shas
+    setSelectedSha(focus.sha)
+    setSelectedShas(shas)
+    setCommitFiles(null)
+    const range = commitRange(shas)
+    live.current.commitKey = range ? `${range.newest}:${range.oldest}` : ''
+    if (range) {
+      post({ type: 'loadCommitFiles', sha: range.newest, oldestSha: range.oldest })
+    }
   }
 
   function selectPullRequest(pr: PullRequestSummary) {
@@ -338,7 +466,9 @@ export function App() {
     setCompareMode(mode)
     setCommits([])
     setSelectedSha(null)
+    setSelectedShas([])
     live.current.selectedSha = null
+    live.current.selectedShas = []
     live.current.compareKey = branch ? `${mode}:${branch}` : ''
     loadHistory(0, branch ? { branch, mode } : null)
   }
@@ -365,8 +495,14 @@ export function App() {
       return file ? { source: { kind: 'working' }, file } : null
     }
     if (tab === 'history') {
-      const file = commitFiles?.sha === selectedSha ? commitFiles?.files.find(f => f.path === commitFilePath) : undefined
-      return file && selectedSha ? { source: { kind: 'commit', sha: selectedSha }, file } : null
+      const range = selectedShas.length > 1 ? commitRange(selectedShas) : null
+      const sha = range ? range.newest : selectedSha
+      if (!sha || (selectedShas.length > 1 && !range)) {
+        return null
+      }
+      const matches = commitFiles?.sha === sha && commitFiles.oldestSha === range?.oldest
+      const file = matches ? commitFiles?.files.find(f => f.path === commitFilePath) : undefined
+      return file ? { source: { kind: 'commit', sha, oldestSha: range?.oldest }, file } : null
     }
     const file = prFiles?.find(f => f.path === prFilePath)
     if (!file || selectedPr === null) {
@@ -376,7 +512,7 @@ export function App() {
       source: prCommit ? { kind: 'prCommit', number: selectedPr, sha: prCommit } : { kind: 'pr', number: selectedPr },
       file,
     }
-  }, [tab, changes, changePath, commitFiles, selectedSha, commitFilePath, prFiles, prFilePath, selectedPr, prCommit])
+  }, [tab, changes, changePath, commitFiles, selectedSha, selectedShas, commitFilePath, prFiles, prFilePath, selectedPr, prCommit])
 
   const isLocalSource = target?.source.kind === 'commit' || target?.source.kind === 'working'
   const targetKey = target
@@ -411,6 +547,145 @@ export function App() {
     post({ type: 'loadDiff', requestId, request: { source: target.source, file, hideWhitespace: diffOptions.hideWhitespace } })
   }, [targetKey, diffRefresh])
 
+  // ---------------------------------------------------------------------------
+  // Commit selection (Changes tab)
+
+  const workingDiff = useMemo(() => {
+    if (tab !== 'changes' || !target || diff?.status !== 'loaded') {
+      return null
+    }
+    const { result } = diff
+    if (result.binary || result.tooLarge || result.message) {
+      return null
+    }
+    const hunks = parseDiff(result.text).hunks
+    return { path: target.file.path, text: result.text, hunks, keys: selectableKeys(hunks) }
+  }, [diff, tab])
+
+  // Line picks are only valid for the diff they were made on; drop them when the file changes.
+  useEffect(() => {
+    const entry = workingDiff && lineExclusions.get(workingDiff.path)
+    if (workingDiff && entry && entry.diffText !== workingDiff.text) {
+      const next = new Map(lineExclusions)
+      next.delete(workingDiff.path)
+      setLineExclusions(next)
+    }
+  }, [workingDiff])
+
+  const checkState = (file: ChangedFile): CheckState => {
+    if (excludedFiles.has(file.path)) {
+      return 'unchecked'
+    }
+    return (lineExclusions.get(file.path)?.excluded.size ?? 0) > 0 ? 'mixed' : 'checked'
+  }
+
+  const setFileIncluded = (paths: string[], include: boolean) => {
+    const files = new Set(excludedFiles)
+    const lines = new Map(lineExclusions)
+    for (const path of paths) {
+      lines.delete(path)
+      if (include) {
+        files.delete(path)
+      } else {
+        files.add(path)
+      }
+    }
+    setExcludedFiles(files)
+    setLineExclusions(lines)
+  }
+
+  const fileChecks: FileChecks | undefined = changes
+    ? {
+        stateOf: checkState,
+        onToggle: f => setFileIncluded([f.path], checkState(f) === 'unchecked'),
+        allState: changes.every(f => checkState(f) === 'checked')
+          ? 'checked'
+          : changes.every(f => checkState(f) === 'unchecked')
+            ? 'unchecked'
+            : 'mixed',
+        onToggleAll: () =>
+          setFileIncluded(
+            changes.map(f => f.path),
+            !changes.every(f => checkState(f) === 'checked')
+          ),
+      }
+    : undefined
+
+  const lineSelectable =
+    workingDiff !== null &&
+    target !== null &&
+    LineSelectableStatuses.has(target.file.status) &&
+    !diffOptions.hideWhitespace &&
+    workingDiff.keys.length > 0
+
+  const lineSelection: LineSelection | undefined =
+    lineSelectable && workingDiff
+      ? {
+          excluded: excludedFiles.has(workingDiff.path)
+            ? new Set(workingDiff.keys)
+            : lineExclusions.get(workingDiff.path)?.excluded ?? new Set(),
+          onChange: (keys, include) => {
+            const path = workingDiff.path
+            const current = excludedFiles.has(path)
+              ? new Set(workingDiff.keys)
+              : new Set(lineExclusions.get(path)?.excluded ?? [])
+            keys.forEach(k => (include ? current.delete(k) : current.add(k)))
+            if (current.size === 0 || current.size === workingDiff.keys.length) {
+              setFileIncluded([path], current.size === 0)
+              return
+            }
+            const files = new Set(excludedFiles)
+            files.delete(path)
+            setExcludedFiles(files)
+            setLineExclusions(new Map(lineExclusions).set(path, { diffText: workingDiff.text, excluded: current }))
+          },
+        }
+      : undefined
+
+  const includedFiles = (changes ?? []).filter(f => checkState(f) !== 'unchecked')
+
+  const commit = () => {
+    const entries: CommitEntry[] = []
+    for (const file of includedFiles) {
+      const lines = lineExclusions.get(file.path)
+      if (lines && lines.excluded.size > 0) {
+        const hunks: DiffHunk[] = parseDiff(lines.diffText).hunks
+        const newFile = file.status === 'untracked' || file.status === 'added'
+        const patch = buildPartialPatch(file.path, hunks, lines.excluded, newFile)
+        if (patch) {
+          entries.push({ file: withoutPatch(file), patch })
+        }
+      } else {
+        entries.push({ file: withoutPatch(file) })
+      }
+    }
+    setCommitting(true)
+    post({ type: 'commit', summary, description, entries })
+  }
+
+  // ---------------------------------------------------------------------------
+  // Context expansion
+
+  const contextKey = `${targetKey}:${diffRefresh}`
+  const contextRef = !target
+    ? null
+    : target.source.kind === 'working'
+      ? null
+      : target.source.kind === 'pr'
+        ? prDetail?.pr.headSha ?? null
+        : target.source.sha
+  const contextSource: ContextSource | undefined =
+    target && ExpandableStatuses.has(target.file.status) && (target.source.kind === 'working' || contextRef)
+      ? {
+          lines: contextLines?.key === contextKey ? contextLines.lines : undefined,
+          request: () => {
+            const id = ++contentRequest.current.id
+            contentRequest.current.key = contextKey
+            post({ type: 'loadFileContent', requestId: id, ref: contextRef, path: target.file.path })
+          },
+        }
+      : undefined
+
   const openInEditor = () => {
     if (target) {
       const { patch, ...file } = target.file
@@ -426,6 +701,13 @@ export function App() {
       whitespaceSupported={isLocalSource}
       onOptionsChange={setDiffOptions}
       onOpenInEditor={openInEditor}
+      selection={lineSelection}
+      selectionNote={
+        tab === 'changes' && diffOptions.hideWhitespace
+          ? 'Lines cannot be selected for the commit while whitespace changes are hidden.'
+          : undefined
+      }
+      context={contextSource}
     />
   )
 
@@ -439,6 +721,8 @@ export function App() {
   const githubCommitUrl = (sha: string) =>
     repo.github ? `https://github.com/${repo.github.owner}/${repo.github.name}/commit/${sha}` : undefined
   const selectedCommit = commits.find(c => c.sha === selectedSha) ?? null
+  const selectedCommits = commits.filter(c => selectedShas.includes(c.sha))
+  const selectedRange = selectedShas.length > 1 ? commitRange(selectedShas) : null
   const filteredPrs = prFilter
     ? prs.filter(p => `${p.title} #${p.number} ${p.author} ${p.headRef}`.toLowerCase().includes(prFilter.toLowerCase()))
     : prs
@@ -486,15 +770,29 @@ export function App() {
             changes === null ? (
               <Loading />
             ) : (
-              <FileList
-                root={repo.root}
-                files={changes}
-                source={{ kind: 'working' }}
-                selectedPath={changePath}
-                onSelect={f => setChangePath(f.path)}
-                onOpenDiff={() => openInEditor()}
-                header={`${changes.length} changed file${changes.length === 1 ? '' : 's'}`}
-              />
+              <>
+                <FileList
+                  root={repo.root}
+                  files={changes}
+                  source={{ kind: 'working' }}
+                  selectedPath={changePath}
+                  onSelect={f => setChangePath(f.path)}
+                  onOpenDiff={() => openInEditor()}
+                  header={`${changes.length} changed file${changes.length === 1 ? '' : 's'}`}
+                  checks={fileChecks}
+                />
+                {lastCommit ? <UndoBar summary={lastCommit.summary} onUndo={() => post({ type: 'undoLastCommit' })} /> : null}
+                <CommitBox
+                  summary={summary}
+                  description={description}
+                  onSummaryChange={setSummary}
+                  onDescriptionChange={setDescription}
+                  branch={repo.branch}
+                  fileCount={includedFiles.length}
+                  busy={committing}
+                  onCommit={commit}
+                />
+              </>
             )
           ) : null}
 
@@ -517,6 +815,8 @@ export function App() {
                 getKey={c => c.sha}
                 selectedKey={selectedSha}
                 onSelect={selectCommit}
+                multiSelectedKeys={selectedShas}
+                onMultiSelect={selectCommits}
                 rowClassName="commit-row"
                 onEndReached={() => {
                   if (historyHasMore && !historyLoading) {
@@ -610,7 +910,7 @@ export function App() {
                     }
                   }}
                   emptyText={prsLoading ? 'Loading…' : prsError ? null : `No ${prState} pull requests`}
-                  getContext={p => ({ webviewSection: 'pullRequest', url: p.url })}
+                  getContext={p => ({ webviewSection: 'pullRequest', url: p.url, root: repo.root, number: p.number })}
                   renderItem={p => (
                     <>
                       <div className="row-title" title={p.title}>
@@ -651,7 +951,29 @@ export function App() {
           ) : null}
 
           {tab === 'history' ? (
-            selectedCommit ? (
+            selectedShas.length > 1 ? (
+              selectedRange ? (
+                withFiles(
+                  <MultiCommitHeader commits={selectedCommits} files={commitFiles?.files ?? null} repo={repo} contiguous />,
+                  commitFiles ? (
+                    <FileList
+                      root={repo.root}
+                      files={commitFiles.files}
+                      source={{ kind: 'commit', sha: selectedRange.newest, oldestSha: selectedRange.oldest }}
+                      selectedPath={commitFilePath}
+                      onSelect={f => setCommitFilePath(f.path)}
+                      onOpenDiff={() => openInEditor()}
+                    />
+                  ) : (
+                    <Loading />
+                  )
+                )
+              ) : (
+                <Placeholder icon="git-compare">
+                  {selectedShas.length} commits selected. Select adjacent commits to see their combined changes.
+                </Placeholder>
+              )
+            ) : selectedCommit ? (
               withFiles(
                 <CommitHeader commit={selectedCommit} files={commitFiles?.files ?? null} repo={repo} />,
                 commitFiles ? (
@@ -681,7 +1003,7 @@ export function App() {
               <Loading text="Loading pull request…" />
             ) : (
               withFiles(
-                <PullRequestHeader pr={prDetail.pr} commitCount={prDetail.commits.length} />,
+                <PullRequestHeader pr={prDetail.pr} commitCount={prDetail.commits.length} currentBranch={repo.branch} />,
                 <>
                   <div className="pr-commit-select">
                     <select value={prCommit ?? ''} onChange={e => selectPrCommit(e.target.value || null)}>

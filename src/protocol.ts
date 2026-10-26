@@ -84,6 +84,30 @@ export type DiffSource =
 
 export type BranchCompareMode = 'behind' | 'ahead'
 
+export interface BranchInfo {
+  /** Short name: `main` for local branches, `origin/main` for remote ones. */
+  name: string
+  remote: boolean
+  /** Upstream of a local branch, e.g. `origin/main`. */
+  upstream?: string
+  /** Committer date of the tip, in milliseconds. */
+  date: number
+}
+
+/** What the push/pull button shows, like GitHub Desktop's third toolbar button. */
+export interface SyncStatus {
+  /** Remote used for fetch and publish; null when the repository has none. */
+  remote: string | null
+  branch: string | null
+  upstream: string | null
+  ahead: number
+  behind: number
+  /** When FETCH_HEAD was last written, in milliseconds. */
+  lastFetched: number | null
+}
+
+export type SyncAction = 'fetch' | 'pull' | 'push' | 'publish'
+
 export interface DiffRequest {
   source: DiffSource
   file: ChangedFile
@@ -123,6 +147,13 @@ export type WebviewToHost =
   | { type: 'discard'; files: ChangedFile[] }
   | { type: 'undoLastCommit' }
   | { type: 'checkoutPullRequest'; number: number }
+  /** Reverts the lines in `patch` (a diff against HEAD) in the working tree. */
+  | { type: 'discardLines'; path: string; patch: string; lineCount: number }
+  | { type: 'loadBranchList' }
+  | { type: 'checkoutBranch'; branch: BranchInfo }
+  | { type: 'createBranch' }
+  | { type: 'loadSyncStatus' }
+  | { type: 'sync'; action: SyncAction }
   | { type: 'loadPullRequests'; state: 'open' | 'closed'; page: number }
   | { type: 'loadPullRequest'; number: number }
   | { type: 'loadPullRequestCommitFiles'; number: number; sha: string }
@@ -137,6 +168,10 @@ export type HostToWebview =
   | { type: 'repos'; repos: RepoInfo[]; current: RepoInfo }
   | { type: 'history'; skip: number; commits: CommitSummary[]; hasMore: boolean; compareKey: string }
   | { type: 'branches'; branches: string[]; current: string | null }
+  | { type: 'branchList'; branches: BranchInfo[] }
+  | { type: 'syncStatus'; status: SyncStatus }
+  /** A push/pull/fetch started (action) or finished (null). */
+  | { type: 'syncing'; action: SyncAction | null }
   | { type: 'commitFiles'; sha: string; oldestSha?: string; files: ChangedFile[] }
   | { type: 'changes'; files: ChangedFile[] }
   | { type: 'diff'; requestId: number; result: DiffResult }

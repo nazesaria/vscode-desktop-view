@@ -3,11 +3,13 @@ import { promises as fs } from 'fs'
 import * as path from 'path'
 import {
   BranchCompareMode,
+  BranchInfo,
   ChangedFile,
   CommitSummary,
   DiffResult,
   FileStatus,
   GitHubRepoRef,
+  SyncStatus,
 } from './protocol'
 
 /** The hash of git's empty tree, used as the base for root commits. */
@@ -513,6 +515,11 @@ export async function restoreToHead(root: string, files: ReadonlyArray<ChangedFi
   }
 }
 
+/** Reverts, in the working tree only, the changes in a patch made against HEAD. */
+export async function discardPatch(root: string, patch: string): Promise<void> {
+  await git(root, ['apply', '-R', '--whitespace=nowarn', '-'], { input: patch })
+}
+
 // ---------------------------------------------------------------------------
 // File contents
 
@@ -557,14 +564,26 @@ async function branchExists(root: string, branch: string): Promise<boolean> {
   }
 }
 
+/** Fetches `refspec` from `remote`; the extension routes this through VS Code's git so credentials work. */
+export type Fetcher = (remote: string, refspec: string) => Promise<void>
+
+const fetchWithGit = (root: string): Fetcher => async (remote, refspec) => {
+  await git(root, ['fetch', '--quiet', remote, refspec])
+}
+
 /**
  * Fetches a pull request and checks it out. Same-repository PRs get a local
  * branch tracking the remote one; fork PRs land on `pr/<number>`, updated
  * fast-forward only so local commits there are never thrown away.
  */
-export async function checkoutPullRequest(root: string, remote: string, pr: PullRequestCheckout): Promise<string> {
+export async function checkoutPullRequest(
+  root: string,
+  remote: string,
+  pr: PullRequestCheckout,
+  fetch: Fetcher = fetchWithGit(root)
+): Promise<string> {
   if (!pr.fromFork) {
-    await git(root, ['fetch', '--quiet', remote, `+refs/heads/${pr.headBranch}:refs/remotes/${remote}/${pr.headBranch}`])
+    await fetch(remote, `+refs/heads/${pr.headBranch}:refs/remotes/${remote}/${pr.headBranch}`)
     if (await branchExists(root, pr.headBranch)) {
       await git(root, ['checkout', '-q', pr.headBranch])
     } else {
@@ -574,12 +593,140 @@ export async function checkoutPullRequest(root: string, remote: string, pr: Pull
   }
 
   const local = `pr/${pr.number}`
-  await git(root, ['fetch', '--quiet', remote, `refs/pull/${pr.number}/head`])
-  if (await branchExists(root, local)) {
-    await git(root, ['checkout', '-q', local])
-    await git(root, ['merge', '--ff-only', '-q', 'FETCH_HEAD'])
-  } else {
-    await git(root, ['checkout', '-q', '-b', local, 'FETCH_HEAD'])
+  // Into a private ref rather than FETCH_HEAD, which VS Code's fetch may overwrite with other refs.
+  const ref = `refs/desktop-view/pr/${pr.number}`
+  await fetch(remote, `+refs/pull/${pr.number}/head:${ref}`)
+  try {
+    if (await branchExists(root, local)) {
+      await git(root, ['checkout', '-q', local])
+      await git(root, ['merge', '--ff-only', '-q', ref])
+    } else {
+      await git(root, ['checkout', '-q', '-b', local, ref])
+    }
+  } finally {
+    await git(root, ['update-ref', '-d', ref])
   }
   return local
+}
+
+// ---------------------------------------------------------------------------
+// Branches
+
+export async function listBranches(root: string): Promise<BranchInfo[]> {
+  const output = await git(root, [
+    'for-each-ref',
+    '--sort=-committerdate',
+    '--format=%(refname)%1f%(upstream:short)%1f%(committerdate:unix)',
+    'refs/heads',
+    'refs/remotes',
+  ])
+  return output
+    .split('\n')
+    .filter(line => line.length > 0)
+    .map(line => {
+      const [ref, upstream, date] = line.split('\x1f')
+      const remote = ref.startsWith('refs/remotes/')
+      return {
+        name: ref.replace(/^refs\/(heads|remotes)\//, ''),
+        remote,
+        upstream: upstream || undefined,
+        date: Number(date) * 1000,
+      }
+    })
+    .filter(b => !(b.remote && b.name.endsWith('/HEAD')))
+}
+
+/** Null when `name` is a valid new branch name, else why it is not. */
+export async function validateBranchName(root: string, name: string): Promise<string | null> {
+  if (!name.trim()) {
+    return 'Enter a branch name.'
+  }
+  try {
+    await git(root, ['check-ref-format', '--branch', name])
+  } catch {
+    return `"${name}" is not a valid branch name.`
+  }
+  if (await branchExists(root, name)) {
+    return `A branch named "${name}" already exists.`
+  }
+  return null
+}
+
+/**
+ * Switches to a branch. Uncommitted changes come along, as with `git checkout`;
+ * git refuses (and nothing changes) when they would be overwritten.
+ * A remote branch is checked out as a local branch tracking it.
+ */
+export async function checkoutBranch(root: string, branch: BranchInfo): Promise<string> {
+  if (!branch.remote) {
+    await git(root, ['checkout', '-q', branch.name])
+    return branch.name
+  }
+  const local = branch.name.slice(branch.name.indexOf('/') + 1)
+  if (await branchExists(root, local)) {
+    await git(root, ['checkout', '-q', local])
+  } else {
+    await git(root, ['checkout', '-q', '-b', local, '--track', branch.name])
+  }
+  return local
+}
+
+/** Creates a branch at HEAD and switches to it, keeping uncommitted changes. */
+export async function createBranch(root: string, name: string): Promise<void> {
+  if (await hasHead(root)) {
+    await git(root, ['checkout', '-q', '-b', name])
+  } else {
+    await git(root, ['symbolic-ref', 'HEAD', `refs/heads/${name}`])
+  }
+}
+
+export async function renameBranch(root: string, from: string, to: string): Promise<void> {
+  await git(root, ['branch', '-m', from, to])
+}
+
+/** Deletes a local branch; without `force`, git refuses when it has unmerged commits. */
+export async function deleteBranch(root: string, name: string, force: boolean): Promise<void> {
+  await git(root, ['branch', force ? '-D' : '-d', name])
+}
+
+// ---------------------------------------------------------------------------
+// Sync status
+
+export async function getSyncStatus(root: string): Promise<SyncStatus> {
+  const remotes = (await git(root, ['remote'])).split('\n').filter(Boolean)
+  const branch = await getCurrentBranch(root)
+  let upstream: string | null = null
+  let ahead = 0
+  let behind = 0
+  if (branch) {
+    try {
+      upstream = (await git(root, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'])).trim() || null
+    } catch {
+      upstream = null
+    }
+    if (upstream) {
+      try {
+        const counts = (await git(root, ['rev-list', '--left-right', '--count', 'HEAD...@{upstream}'])).trim()
+        ;[ahead, behind] = counts.split(/\s+/).map(Number)
+      } catch {
+        // The upstream ref is gone (deleted on the remote and pruned).
+        upstream = null
+      }
+    }
+  }
+  const upstreamRemote = upstream ? remotes.find(r => upstream!.startsWith(`${r}/`)) : undefined
+  let lastFetched: number | null = null
+  try {
+    lastFetched = (await fs.stat(path.join(await absoluteGitDir(root), 'FETCH_HEAD'))).mtimeMs
+  } catch {
+    lastFetched = null
+  }
+  return {
+    remote: upstreamRemote ?? (remotes.includes('origin') ? 'origin' : remotes[0] ?? null),
+    branch,
+    upstream,
+    ahead,
+    behind,
+    lastFetched,
+  }
 }

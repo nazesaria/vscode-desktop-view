@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { buildPartialPatch, DiffHunk, parseDiff, selectableKeys } from '../src/diff-parser'
+import { buildDiscardPatch, buildPartialPatch, DiffHunk, parseDiff, selectableKeys } from '../src/diff-parser'
 import {
+  BranchInfo,
   ChangedFile,
   CommitEntry,
   CommitSummary,
@@ -8,6 +9,8 @@ import {
   HostToWebview,
   PullRequestSummary,
   RepoInfo,
+  SyncAction,
+  SyncStatus,
 } from '../src/protocol'
 import { CommitBox, UndoBar } from './components/CommitBox'
 import { Avatar, Icon, Loading, Placeholder, Resizer } from './components/Common'
@@ -77,6 +80,9 @@ export function App() {
     hideWhitespace: persisted.hideWhitespace ?? false,
   })
   const [error, setError] = useState<string | null>(null)
+  const [branchList, setBranchList] = useState<BranchInfo[] | null>(null)
+  const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null)
+  const [syncing, setSyncing] = useState<SyncAction | null>(null)
 
   // Changes
   const [changes, setChanges] = useState<ChangedFile[] | null>(null)
@@ -188,6 +194,9 @@ export function App() {
   }, [])
 
   const resetForRepo = () => {
+    setBranchList(null)
+    setSyncStatus(null)
+    setSyncing(null)
     setChanges(null)
     setChangePath(null)
     setCommits([])
@@ -256,6 +265,19 @@ export function App() {
           return
         case 'branches':
           setBranches(m.branches)
+          return
+        case 'branchList':
+          setBranchList(m.branches)
+          return
+        case 'syncStatus':
+          setSyncStatus(m.status)
+          return
+        case 'syncing':
+          setSyncing(m.action)
+          if (m.action === 'push' || m.action === 'publish') {
+            // A pushed commit can no longer be undone.
+            setLastCommit(null)
+          }
           return
         case 'commitFiles':
           if (`${m.sha}:${m.oldestSha ?? ''}` === live.current.commitKey) {
@@ -475,6 +497,7 @@ export function App() {
 
   const refresh = () => {
     post({ type: 'loadChanges' })
+    post({ type: 'loadSyncStatus' })
     changeCompare(compareBranch)
     setBranches(null)
     if (repo?.github && tab === 'prs') {
@@ -642,6 +665,16 @@ export function App() {
         }
       : undefined
 
+  const discardLines =
+    lineSelectable && workingDiff
+      ? (keys: string[]) => {
+          const patch = buildDiscardPatch(workingDiff.path, workingDiff.hunks, new Set(keys))
+          if (patch) {
+            post({ type: 'discardLines', path: workingDiff.path, patch, lineCount: keys.length })
+          }
+        }
+      : undefined
+
   const includedFiles = (changes ?? []).filter(f => checkState(f) !== 'unchecked')
 
   const commit = () => {
@@ -702,9 +735,10 @@ export function App() {
       onOptionsChange={setDiffOptions}
       onOpenInEditor={openInEditor}
       selection={lineSelection}
+      onDiscard={discardLines}
       selectionNote={
         tab === 'changes' && diffOptions.hideWhitespace
-          ? 'Lines cannot be selected for the commit while whitespace changes are hidden.'
+          ? 'Lines cannot be selected or discarded while whitespace changes are hidden.'
           : undefined
       }
       context={contextSource}
@@ -750,7 +784,14 @@ export function App() {
 
   return (
     <div className="app">
-      <Toolbar repos={repos} current={repo} onRefresh={refresh} />
+      <Toolbar
+        repos={repos}
+        current={repo}
+        onRefresh={refresh}
+        branches={branchList}
+        sync={syncStatus}
+        syncing={syncing}
+      />
       <div className="main">
         <div className="sidebar" style={{ width: sidebarWidth }}>
           <div className="tabs" role="tablist">

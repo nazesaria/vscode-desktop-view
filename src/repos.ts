@@ -8,9 +8,12 @@ interface GitRepositoryState {
   readonly HEAD: { readonly name?: string; readonly commit?: string } | undefined
   readonly onDidChange: vscode.Event<void>
 }
-interface GitRepository {
+export interface GitRepository {
   readonly rootUri: vscode.Uri
   readonly state: GitRepositoryState
+  fetch(options?: { remote?: string; ref?: string }): Promise<void>
+  pull(): Promise<void>
+  push(remoteName?: string, branchName?: string, setUpstream?: boolean): Promise<void>
 }
 interface GitAPI {
   readonly state: 'uninitialized' | 'initialized'
@@ -124,6 +127,11 @@ export class RepoRegistry implements vscode.Disposable {
       }
     }
     return roots[0]
+  }
+
+  /** The built-in git extension's repository, whose remote operations use VS Code's credentials. */
+  repository(root: string): GitRepository | undefined {
+    return this.api?.repositories.find(r => r.rootUri.fsPath === root)
   }
 
   headSha(root: string): string | undefined {

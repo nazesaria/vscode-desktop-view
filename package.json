@@ -2,7 +2,7 @@
   "name": "desktop-view",
   "displayName": "Desktop View",
   "description": "GitHub Desktop style history, changes and pull request viewer for the repositories in your workspace.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "nazesaria",
   "license": "MIT",
   "private": true,
@@ -95,6 +95,21 @@
         "command": "desktopView.ctx.checkoutPullRequest",
         "title": "Checkout Pull Request",
         "category": "Desktop View"
+      },
+      {
+        "command": "desktopView.ctx.renameBranch",
+        "title": "Rename...",
+        "category": "Desktop View"
+      },
+      {
+        "command": "desktopView.ctx.deleteBranch",
+        "title": "Delete...",
+        "category": "Desktop View"
+      },
+      {
+        "command": "desktopView.ctx.copyBranchName",
+        "title": "Copy Branch Name",
+        "category": "Desktop View"
       }
     ],
     "menus": {
@@ -156,6 +171,18 @@
         {
           "command": "desktopView.ctx.checkoutPullRequest",
           "when": "false"
+        },
+        {
+          "command": "desktopView.ctx.renameBranch",
+          "when": "false"
+        },
+        {
+          "command": "desktopView.ctx.deleteBranch",
+          "when": "false"
+        },
+        {
+          "command": "desktopView.ctx.copyBranchName",
+          "when": "false"
         }
       ],
       "webview/context": [
@@ -208,6 +235,21 @@
           "command": "desktopView.ctx.checkoutPullRequest",
           "when": "webviewId == desktopView && webviewSection == pullRequest",
           "group": "1_checkout@1"
+        },
+        {
+          "command": "desktopView.ctx.copyBranchName",
+          "when": "webviewId == desktopView && webviewSection == branch",
+          "group": "1_copy@1"
+        },
+        {
+          "command": "desktopView.ctx.renameBranch",
+          "when": "webviewId == desktopView && webviewSection == branch && !desktopViewRemoteBranch",
+          "group": "2_edit@1"
+        },
+        {
+          "command": "desktopView.ctx.deleteBranch",
+          "when": "webviewId == desktopView && webviewSection == branch && !desktopViewRemoteBranch && !desktopViewCurrentBranch",
+          "group": "2_edit@2"
         }
       ]
     },

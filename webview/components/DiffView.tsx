@@ -40,6 +40,8 @@ interface DiffViewProps {
   /** Shown instead of enabling line selection, e.g. while whitespace is hidden. */
   selectionNote?: string
   context?: ContextSource
+  /** Reverts the given lines in the working tree (Changes tab only). */
+  onDiscard?: (keys: string[]) => void
 }
 
 /** Rendering every line of a huge diff locks up the webview; show this many rows first. */
@@ -250,6 +252,23 @@ function DiffBody(props: DiffViewProps & { file: ChangedFile }) {
     return { byLine, fileHtml }
   }, [parsed, language, contentLines])
 
+  // Right click on a changed line or hunk header: discard it, like GitHub Desktop.
+  const [menu, setMenu] = useState<{ x: number; y: number; line: string | null; hunk: number } | null>(null)
+  useEffect(() => setMenu(null), [state])
+  const hunkKeys = (h: number) =>
+    hunks[h].lines
+      .map((l, i) => (l.kind === 'add' || l.kind === 'delete' ? lineKey(h, i) : null))
+      .filter((k): k is string => k !== null)
+  const contextMenuFor = (hunk: number, line: string | null) =>
+    props.onDiscard
+      ? {
+          onContextMenu: (e: React.MouseEvent) => {
+            e.preventDefault()
+            setMenu({ x: e.clientX, y: e.clientY, line, hunk })
+          },
+        }
+      : {}
+
   // Drag across gutters to select or deselect several lines, like GitHub Desktop.
   const drag = useRef<boolean | null>(null)
   useEffect(() => {
@@ -261,6 +280,9 @@ function DiffBody(props: DiffViewProps & { file: ChangedFile }) {
     selection
       ? {
           onMouseDown: (e: React.MouseEvent) => {
+            if (e.button !== 0) {
+              return
+            }
             e.preventDefault()
             const include = selection.excluded.has(key)
             drag.current = include
@@ -277,9 +299,7 @@ function DiffBody(props: DiffViewProps & { file: ChangedFile }) {
     if (!selection) {
       return
     }
-    const keys = hunks[h].lines
-      .map((l, i) => (l.kind === 'add' || l.kind === 'delete' ? lineKey(h, i) : null))
-      .filter((k): k is string => k !== null)
+    const keys = hunkKeys(h)
     selection.onChange(keys, keys.some(k => selection.excluded.has(k)))
   }
 
@@ -315,14 +335,13 @@ function DiffBody(props: DiffViewProps & { file: ChangedFile }) {
     expand,
     selection,
     gutterHandlers,
+    contextMenuFor,
     toggleHunk,
     hunkState: (h: number) => {
       if (!selection) {
         return null
       }
-      const keys = hunks[h].lines
-        .map((l, i) => (l.kind === 'add' || l.kind === 'delete' ? lineKey(h, i) : null))
-        .filter((k): k is string => k !== null)
+      const keys = hunkKeys(h)
       const excluded = keys.filter(k => selection.excluded.has(k)).length
       return excluded === 0 ? 'checked' : excluded === keys.length ? 'unchecked' : 'mixed'
     },
@@ -339,7 +358,60 @@ function DiffBody(props: DiffViewProps & { file: ChangedFile }) {
           </button>
         </div>
       ) : null}
+      {menu && props.onDiscard ? (
+        <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)}>
+          {menu.line ? (
+            <button className="menu-item" onClick={() => (setMenu(null), props.onDiscard!([menu.line!]))}>
+              Discard {lineKindLabel(hunks, menu.line)}
+            </button>
+          ) : null}
+          <button className="menu-item" onClick={() => (setMenu(null), props.onDiscard!(hunkKeys(menu.hunk)))}>
+            Discard hunk
+          </button>
+        </ContextMenu>
+      ) : null}
     </>
+  )
+}
+
+function lineKindLabel(hunks: ReturnType<typeof parseDiff>['hunks'], key: string): string {
+  const [h, i] = key.split(':').map(Number)
+  return hunks[h]?.lines[i]?.kind === 'add' ? 'added line' : 'removed line'
+}
+
+function ContextMenu(props: { x: number; y: number; onClose: () => void; children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState({ left: props.x, top: props.y })
+  useEffect(() => {
+    // Keep the menu inside the window.
+    const el = ref.current
+    if (el) {
+      setPos({
+        left: Math.min(props.x, window.innerWidth - el.offsetWidth - 4),
+        top: Math.min(props.y, window.innerHeight - el.offsetHeight - 4),
+      })
+    }
+    const close = (e: Event) => {
+      if (!(e.target instanceof Node && ref.current?.contains(e.target))) {
+        props.onClose()
+      }
+    }
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && props.onClose()
+    window.addEventListener('mousedown', close)
+    window.addEventListener('keydown', esc)
+    window.addEventListener('wheel', close)
+    window.addEventListener('blur', props.onClose)
+    return () => {
+      window.removeEventListener('mousedown', close)
+      window.removeEventListener('keydown', esc)
+      window.removeEventListener('wheel', close)
+      window.removeEventListener('blur', props.onClose)
+    }
+  }, [props.x, props.y])
+  return (
+    <div ref={ref} className="popover context-menu" style={pos} role="menu">
+      {props.children}
+    </div>
   )
 }
 
@@ -350,6 +422,7 @@ interface RowTools {
   expand: (gap: number, direction: ExpandDirection) => void
   selection: LineSelection | undefined
   gutterHandlers: (key: string) => object
+  contextMenuFor: (hunk: number, line: string | null) => object
   toggleHunk: (hunk: number) => void
   hunkState: (hunk: number) => 'checked' | 'unchecked' | 'mixed' | null
 }
@@ -365,8 +438,9 @@ function revealedHtml(tools: RowTools, newLine: number): string {
 }
 
 /** A zero-width space keeps empty lines at full height. */
-function Code(props: { html: string; className?: string }) {
-  return <td className={`code ${props.className ?? ''}`} dangerouslySetInnerHTML={{ __html: props.html || '​' }} />
+function Code(props: { html: string; className?: string } & React.HTMLAttributes<HTMLTableCellElement>) {
+  const { html, className, ...rest } = props
+  return <td {...rest} className={`code ${className ?? ''}`} dangerouslySetInnerHTML={{ __html: html || '​' }} />
 }
 
 function Expanders(props: { row: Extract<Row, { kind: 'hunk' | 'tail' }>; tools: RowTools }) {
@@ -443,7 +517,7 @@ function UnifiedTable(props: { rows: Row[]; tools: RowTools }) {
             case 'hunk':
             case 'tail':
               return (
-                <tr key={r} className="line hunk">
+                <tr key={r} className="line hunk" {...(row.kind === 'hunk' ? tools.contextMenuFor(row.hunk, null) : {})}>
                   <td className="ln expander" colSpan={2}>
                     <Expanders row={row} tools={tools} />
                   </td>
@@ -479,8 +553,9 @@ function UnifiedTable(props: { rows: Row[]; tools: RowTools }) {
                 )
               }
               const handlers = line.kind === 'context' ? {} : tools.gutterHandlers(key)
+              const menu = tools.contextMenuFor(row.hunk, line.kind === 'context' ? null : key)
               return (
-                <tr key={r} className={`line ${line.kind} ${selectionClass(tools, line, key)}`}>
+                <tr key={r} className={`line ${line.kind} ${selectionClass(tools, line, key)}`} {...menu}>
                   <td className="ln" {...handlers}>
                     {line.oldLine ?? ''}
                   </td>
@@ -555,7 +630,11 @@ function SplitTable(props: { rows: Row[]; tools: RowTools }) {
         {rows.map((row, i) => {
           if (row.kind === 'header') {
             return (
-              <tr key={i} className="line hunk">
+              <tr
+                key={i}
+                className="line hunk"
+                {...(row.row.kind === 'hunk' ? tools.contextMenuFor(row.row.hunk, null) : {})}
+              >
                 <td className="ln expander">
                   <Expanders row={row.row} tools={tools} />
                 </td>
@@ -607,12 +686,13 @@ function SplitSide(props: { row: Extract<Row, { kind: 'line' }> | null; side: 'l
   const number = props.side === 'left' ? line.oldLine : line.newLine
   const selectable = selectionClass(tools, line, key)
   const handlers = line.kind === 'context' ? {} : tools.gutterHandlers(key)
+  const menu = tools.contextMenuFor(row.hunk, line.kind === 'context' ? null : key)
   return (
     <>
-      <td className={`ln ${line.kind} ${selectable}`} {...handlers}>
+      <td className={`ln ${line.kind} ${selectable}`} {...handlers} {...menu}>
         {number ?? ''}
       </td>
-      <Code html={codeHtml(tools, line)} className={`${line.kind} ${selectable}`} />
+      <Code html={codeHtml(tools, line)} className={`${line.kind} ${selectable}`} {...menu} />
     </>
   )
 }

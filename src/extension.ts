@@ -4,10 +4,13 @@ import { GitHubClient } from './github'
 import { getWorkingChanges } from './git'
 import {
   checkoutPullRequestWithProgress,
+  deleteBranchInteractive,
   DesktopViewPanel,
   discardChanges,
+  gitErrorText,
   openDiffInEditor,
   PanelDeps,
+  renameBranchInteractive,
   ViewType,
 } from './panel'
 import { ChangedFile, DiffSource } from './protocol'
@@ -21,6 +24,7 @@ interface WebviewContextArgs {
   path?: string
   diff?: string
   number?: number
+  branch?: string
 }
 
 export async function activate(context: vscode.ExtensionContext) {
@@ -124,10 +128,25 @@ export async function activate(context: vscode.ExtensionContext) {
       try {
         await checkoutPullRequestWithProgress(deps, a.root, a.number)
       } catch (e) {
-        void vscode.window.showErrorMessage(e instanceof Error ? e.message : String(e))
+        void vscode.window.showErrorMessage(gitErrorText(e))
       }
     }
   })
+  const branchCommand = (id: string, fn: (root: string, branch: string) => Promise<boolean>) =>
+    command(id, async (a: WebviewContextArgs) => {
+      if (a.root && a.branch) {
+        try {
+          if (await fn(a.root, a.branch)) {
+            await DesktopViewPanel.refreshBranches(a.root)
+          }
+        } catch (e) {
+          void vscode.window.showErrorMessage(gitErrorText(e))
+        }
+      }
+    })
+  branchCommand('desktopView.ctx.renameBranch', renameBranchInteractive)
+  branchCommand('desktopView.ctx.deleteBranch', deleteBranchInteractive)
+  command('desktopView.ctx.copyBranchName', (a: WebviewContextArgs) => a.branch && vscode.env.clipboard.writeText(a.branch))
 
   // Status bar shortcut, like the "current repository" button in GitHub Desktop.
   const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50)

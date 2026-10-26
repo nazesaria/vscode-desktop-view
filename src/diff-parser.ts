@@ -195,6 +195,82 @@ export function buildPartialPatch(
   return [...header, ...out].join('\n') + '\n'
 }
 
+/**
+ * Builds a patch whose new side is the current working tree file and which,
+ * applied in reverse, reverts only the given lines. The mirror image of
+ * buildPartialPatch: an unselected addition stays as context (it is in the
+ * file) and an unselected deletion is dropped (it is not).
+ * Returns null when no add/delete line is selected.
+ */
+export function buildDiscardPatch(
+  path: string,
+  hunks: ReadonlyArray<DiffHunk>,
+  selected: ReadonlySet<string>
+): string | null {
+  const out: string[] = []
+  let offset = 0
+  let any = false
+
+  hunks.forEach((hunk, h) => {
+    const body: string[] = []
+    let oldCount = 0
+    let newCount = 0
+    let changed = false
+    let lastEmitted = false
+    hunk.lines.forEach((line, i) => {
+      const eol = line.cr ? '\r' : ''
+      const chosen = selected.has(lineKey(h, i))
+      switch (line.kind) {
+        case 'context':
+          body.push(` ${line.text}${eol}`)
+          oldCount++
+          newCount++
+          lastEmitted = true
+          break
+        case 'add':
+          lastEmitted = true
+          if (chosen) {
+            body.push(`+${line.text}${eol}`)
+            changed = true
+          } else {
+            body.push(` ${line.text}${eol}`)
+            oldCount++
+          }
+          newCount++
+          break
+        case 'delete':
+          lastEmitted = chosen
+          if (chosen) {
+            body.push(`-${line.text}${eol}`)
+            oldCount++
+            changed = true
+          }
+          break
+        case 'noNewline':
+          if (lastEmitted) {
+            body.push(line.text)
+          }
+          break
+      }
+    })
+    if (!changed) {
+      return
+    }
+    any = true
+    // The new side is the working tree as diffed, so its coordinates are unchanged.
+    const { newFirst } = hunkRange(hunk)
+    const oldFirst = newFirst - offset
+    const oldStart = oldCount === 0 ? oldFirst - 1 : oldFirst
+    out.push(`@@ -${oldStart},${oldCount} +${hunk.newStart},${newCount} @@`, ...body)
+    offset += newCount - oldCount
+  })
+
+  if (!any) {
+    return null
+  }
+  return [`diff --git a/${path} b/${path}`, `--- a/${path}`, `+++ b/${path}`, ...out].join('\n') + '\n'
+}
+
 // ---------------------------------------------------------------------------
 // Context expansion
 

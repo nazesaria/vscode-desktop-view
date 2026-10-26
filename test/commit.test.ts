@@ -4,18 +4,26 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { buildPartialPatch, parseDiff, selectableKeys } from '../src/diff-parser'
+import { buildDiscardPatch, buildPartialPatch, lineKey, parseDiff, selectableKeys } from '../src/diff-parser'
 import {
   canUndoLastCommit,
+  checkoutBranch,
   checkoutPullRequest,
   commitChanges,
+  createBranch,
+  deleteBranch,
+  discardPatch,
   getCommitFiles,
   getCurrentBranch,
   getFileContent,
   getWorkingChanges,
+  getSyncStatus,
   getWorkingDiff,
+  listBranches,
+  renameBranch,
   restoreToHead,
   undoLastCommit,
+  validateBranchName,
 } from '../src/git'
 
 let base: string
@@ -187,4 +195,113 @@ test('checks out pull requests from the same repository and from forks', async (
   // Checking out again fast-forwards the existing branch.
   r('checkout', '-q', 'main')
   assert.equal(await checkoutPullRequest(repo, 'origin', { number: 7, headBranch: 'whatever', fromFork: true }), 'pr/7')
+  // The temporary fetch ref is not left behind.
+  assert.equal(r('for-each-ref', 'refs/desktop-view'), '')
+})
+
+/** Keys of the diff lines whose kind and text match, e.g. 'add:five'. */
+const keysWhere = (hunks: ReturnType<typeof parseDiff>['hunks'], wanted: string[]) => {
+  const keys = new Set<string>()
+  hunks.forEach((hunk, h) =>
+    hunk.lines.forEach((line, i) => wanted.includes(`${line.kind}:${line.text}`) && keys.add(lineKey(h, i)))
+  )
+  return keys
+}
+
+test('discards selected lines and keeps the others', async () => {
+  const original = read('a.txt')
+  write(
+    'a.txt',
+    original
+      .replace('line 5\nline 6\n', 'five\nsix\n')
+      .replace('line 10\n', 'line 10\nextra\n')
+      .replace('line 25\n', 'line 25 edited\n')
+  )
+  const [file] = await getWorkingChanges(repo)
+  const diff = parseDiff((await getWorkingDiff(repo, file, 3, false)).text)
+  // Revert "line 5" -> "five" and the second hunk; keep the "line 6" -> "six" swap and "extra".
+  const selected = keysWhere(diff.hunks, ['delete:line 5', 'add:five', 'delete:line 25', 'add:line 25 edited'])
+  await discardPatch(repo, buildDiscardPatch(file.path, diff.hunks, selected)!)
+  assert.equal(
+    read('a.txt'),
+    original.replace('line 6\n', 'six\n').replace('line 10\n', 'line 10\nextra\n')
+  )
+  // Discarding only an added line and only a deleted line.
+  const diff2 = parseDiff((await getWorkingDiff(repo, file, 3, false)).text)
+  await discardPatch(repo, buildDiscardPatch(file.path, diff2.hunks, keysWhere(diff2.hunks, ['add:extra']))!)
+  const diff3 = parseDiff((await getWorkingDiff(repo, file, 3, false)).text)
+  await discardPatch(repo, buildDiscardPatch(file.path, diff3.hunks, keysWhere(diff3.hunks, ['delete:line 6']))!)
+  assert.equal(read('a.txt'), original.replace('line 6\n', 'line 6\nsix\n'))
+  assert.equal(buildDiscardPatch(file.path, diff3.hunks, new Set()), null)
+})
+
+test('discards lines of a CRLF file without touching line endings', async () => {
+  write('crlf.txt', 'one\r\ntwo\r\nthree\r\n')
+  r('add', 'crlf.txt')
+  r('commit', '-qm', 'crlf')
+  write('crlf.txt', 'one\r\nTWO\r\nthree\r\nfour\r\n')
+  const file = (await getWorkingChanges(repo)).find(f => f.path === 'crlf.txt')!
+  const diff = parseDiff((await getWorkingDiff(repo, file, 3, false)).text)
+  await discardPatch(repo, buildDiscardPatch(file.path, diff.hunks, keysWhere(diff.hunks, ['add:four']))!)
+  assert.equal(read('crlf.txt'), 'one\r\nTWO\r\nthree\r\n')
+})
+
+test('lists, validates, creates, switches, renames and deletes branches', async () => {
+  assert.equal(await validateBranchName(repo, 'main'), 'A branch named "main" already exists.')
+  assert.match((await validateBranchName(repo, 'bad..name'))!, /not a valid/)
+  assert.equal(await validateBranchName(repo, 'feature/new'), null)
+
+  write('b.txt', 'uncommitted\n')
+  await createBranch(repo, 'feature/new')
+  assert.equal(await getCurrentBranch(repo), 'feature/new')
+  // Uncommitted changes travel with the switch.
+  assert.equal(read('b.txt'), 'uncommitted\n')
+  r('commit', '-qam', 'On feature')
+
+  await checkoutBranch(repo, { name: 'main', remote: false, date: 0 })
+  assert.equal(await getCurrentBranch(repo), 'main')
+  await renameBranch(repo, 'feature/new', 'feature/renamed')
+  const names = (await listBranches(repo)).map(b => b.name)
+  assert.deepEqual(names.sort(), ['feature/renamed', 'main'])
+  // Unmerged work is protected unless forced.
+  await assert.rejects(deleteBranch(repo, 'feature/renamed', false))
+  await deleteBranch(repo, 'feature/renamed', true)
+  assert.deepEqual((await listBranches(repo)).map(b => b.name), ['main'])
+})
+
+test('sync status counts ahead/behind and remote branches check out as tracking branches', async () => {
+  let status = await getSyncStatus(repo)
+  assert.deepEqual({ ...status, lastFetched: null }, {
+    remote: null, branch: 'main', upstream: null, ahead: 0, behind: 0, lastFetched: null,
+  })
+
+  const remote = join(base, 'remote.git')
+  run(base, 'init', '-q', '--bare', '-b', 'main', 'remote.git')
+  r('remote', 'add', 'origin', remote)
+  status = await getSyncStatus(repo)
+  assert.equal(status.remote, 'origin')
+  assert.equal(status.upstream, null)
+
+  r('push', '-q', '-u', 'origin', 'main')
+  r('push', '-q', 'origin', 'main:topic')
+  write('b.txt', 'local\n')
+  r('commit', '-qam', 'Local')
+  // Someone else pushes to main.
+  const other = join(base, 'other')
+  run(base, 'clone', '-q', remote, 'other')
+  run(other, '-c', 'user.name=O', '-c', 'user.email=o@example.com', 'commit', '-q', '--allow-empty', '-m', 'Remote')
+  run(other, 'push', '-q', 'origin', 'main')
+  r('fetch', '-q')
+
+  status = await getSyncStatus(repo)
+  assert.equal(status.upstream, 'origin/main')
+  assert.equal(status.ahead, 1)
+  assert.equal(status.behind, 1)
+  assert.ok(status.lastFetched && status.lastFetched > Date.now() - 60_000)
+
+  const topic = (await listBranches(repo)).find(b => b.name === 'origin/topic')!
+  assert.equal(topic.remote, true)
+  assert.equal(await checkoutBranch(repo, topic), 'topic')
+  assert.equal(r('rev-parse', '--abbrev-ref', '@{upstream}').trim(), 'origin/topic')
+  assert.equal((await listBranches(repo)).find(b => b.name === 'main')!.upstream, 'origin/main')
 })

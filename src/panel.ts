@@ -2,25 +2,36 @@ import * as path from 'path'
 import * as vscode from 'vscode'
 import {
   canUndoLastCommit,
+  checkoutBranch,
   checkoutPullRequest,
   commitBase,
   commitChanges,
   commitExists,
+  createBranch,
+  deleteBranch,
+  discardPatch,
   EmptyTreeSha,
+  Fetcher,
   getBranches,
   getCommitDiff,
   getCommitFiles,
+  getCurrentBranch,
   getFileContent,
   getHeadSha,
   getHistory,
+  getSyncStatus,
   getWorkingChanges,
   getWorkingDiff,
+  git,
+  listBranches,
   mergeBase,
+  renameBranch,
   restoreToHead,
   undoLastCommit,
+  validateBranchName,
 } from './git'
 import { GitHubClient } from './github'
-import { ChangedFile, DiffSource, HostToWebview, RepoInfo, WebviewToHost } from './protocol'
+import { ChangedFile, DiffSource, HostToWebview, RepoInfo, SyncAction, SyncStatus, WebviewToHost } from './protocol'
 import { RepoRegistry } from './repos'
 
 export const ViewType = 'desktopView'
@@ -62,8 +73,18 @@ export class DesktopViewPanel implements vscode.Disposable {
     new DesktopViewPanel(panel, deps, root)
   }
 
+  /** Sends a fresh branch list to the panels showing `root`, after a rename or delete. */
+  static async refreshBranches(root: string) {
+    for (const panel of DesktopViewPanel.panels) {
+      if (panel.root === root) {
+        panel.post({ type: 'branchList', branches: await listBranches(root) })
+      }
+    }
+  }
+
   private readonly disposables: vscode.Disposable[] = []
   private lastHead: string | null | undefined
+  private lastBranch: string | null | undefined
   private refreshTimer: NodeJS.Timeout | undefined
 
   private constructor(
@@ -108,14 +129,26 @@ export class DesktopViewPanel implements vscode.Disposable {
   private scheduleRefresh() {
     clearTimeout(this.refreshTimer)
     this.refreshTimer = setTimeout(async () => {
-      const head = await getHeadSha(this.root)
+      const [head, branch] = await Promise.all([getHeadSha(this.root), getCurrentBranch(this.root)])
       const headChanged = head !== this.lastHead
+      // Switching to a branch at the same commit changes the branch but not HEAD's sha.
+      const branchChanged = branch !== this.lastBranch
       this.lastHead = head
+      this.lastBranch = branch
       this.post({ type: 'repoChanged', headChanged, head })
-      if (headChanged) {
+      if (headChanged || branchChanged) {
         await this.sendRepos()
       }
+      await this.sendSyncStatus()
     }, 400)
+  }
+
+  private async sendSyncStatus() {
+    this.post({ type: 'syncStatus', status: await getSyncStatus(this.root) })
+  }
+
+  private async rememberHead() {
+    ;[this.lastHead, this.lastBranch] = await Promise.all([getHeadSha(this.root), getCurrentBranch(this.root)])
   }
 
   private async sendRepos() {
@@ -144,7 +177,7 @@ export class DesktopViewPanel implements vscode.Disposable {
       this.post({
         type: 'error',
         scope: message.type,
-        message: e instanceof Error ? e.message : String(e),
+        message: gitErrorText(e),
         requestId,
       })
     }
@@ -154,10 +187,11 @@ export class DesktopViewPanel implements vscode.Disposable {
     const root = this.root
     switch (message.type) {
       case 'ready': {
-        this.lastHead = await getHeadSha(root)
+        await this.rememberHead()
         const repos = await this.deps.repos.describeAll()
         const current = repos.find(r => r.root === root) ?? (await this.currentRepo())
         this.post({ type: 'init', repos, current, pageSize: this.config().pageSize })
+        await this.sendSyncStatus()
         if (current.github) {
           await this.deps.github.refreshSession(false)
         }
@@ -171,11 +205,12 @@ export class DesktopViewPanel implements vscode.Disposable {
           return
         }
         this.root = message.root
-        this.lastHead = await getHeadSha(this.root)
+        await this.rememberHead()
         this.updateTitle()
         const repos = await this.deps.repos.describeAll()
         const current = repos.find(r => r.root === this.root) ?? (await this.currentRepo())
         this.post({ type: 'init', repos, current, pageSize: this.config().pageSize })
+        await this.sendSyncStatus()
         return
       }
       case 'openRepoInNewTab':
@@ -291,6 +326,38 @@ export class DesktopViewPanel implements vscode.Disposable {
       case 'checkoutPullRequest':
         await checkoutPullRequestWithProgress(this.deps, root, message.number)
         this.scheduleRefresh()
+        return
+      case 'discardLines':
+        if (await discardLines(root, message.path, message.patch, message.lineCount)) {
+          this.scheduleRefresh()
+        }
+        return
+      case 'loadBranchList':
+        this.post({ type: 'branchList', branches: await listBranches(root) })
+        return
+      case 'checkoutBranch':
+        await checkoutBranch(root, message.branch)
+        this.scheduleRefresh()
+        return
+      case 'createBranch':
+        if (await createBranchInteractive(root)) {
+          this.scheduleRefresh()
+        }
+        return
+      case 'loadSyncStatus':
+        await this.sendSyncStatus()
+        return
+      case 'sync':
+        this.post({ type: 'syncing', action: message.action })
+        try {
+          await runSync(this.deps, root, message.action, await getSyncStatus(root))
+        } catch (e) {
+          void vscode.window.showErrorMessage(gitErrorText(e))
+        } finally {
+          this.post({ type: 'syncing', action: null })
+          await this.sendSyncStatus()
+          this.scheduleRefresh()
+        }
         return
       case 'openDiffInEditor':
         await openDiffInEditor(this.deps, root, message.source, message.file)
@@ -462,6 +529,138 @@ export async function discardChanges(root: string, files: ReadonlyArray<ChangedF
   return true
 }
 
+/** Errors from VS Code's git API carry git's output in `stderr`. */
+export function gitErrorText(e: unknown): string {
+  const stderr = (e as { stderr?: unknown })?.stderr
+  if (typeof stderr === 'string' && stderr.trim()) {
+    return stderr.trim()
+  }
+  return e instanceof Error ? e.message : String(e)
+}
+
+/** Fetches through VS Code's git extension when available, so its credential prompts and GitHub sign-in apply. */
+function fetcher(deps: PanelDeps, root: string): Fetcher | undefined {
+  const repo = deps.repos.repository(root)
+  return repo ? (remote, refspec) => repo.fetch({ remote, ref: refspec }) : undefined
+}
+
+/** Runs the push/pull button's action. */
+export async function runSync(deps: PanelDeps, root: string, action: SyncAction, status: SyncStatus) {
+  const { remote, branch } = status
+  if (!remote) {
+    throw new Error('This repository has no remote to sync with.')
+  }
+  const repo = deps.repos.repository(root)
+  switch (action) {
+    case 'fetch':
+      return repo ? repo.fetch({ remote }) : git(root, ['fetch', '--quiet', remote])
+    case 'pull':
+      return repo ? repo.pull() : git(root, ['pull', '--quiet'])
+    case 'push':
+      return repo ? repo.push() : git(root, ['push', '--quiet'])
+    case 'publish':
+      if (!branch) {
+        throw new Error('Check out a branch before publishing.')
+      }
+      return repo ? repo.push(remote, branch, true) : git(root, ['push', '--quiet', '--set-upstream', remote, branch])
+  }
+}
+
+/** Reverts the selected lines of a file after confirmation. Returns whether it did. */
+export async function discardLines(root: string, filePath: string, patch: string, lineCount: number): Promise<boolean> {
+  const choice = await vscode.window.showWarningMessage(
+    `Discard ${lineCount === 1 ? 'the selected line' : `${lineCount} selected lines`} in ${path.basename(filePath)}?`,
+    { modal: true, detail: 'The lines go back to their committed version. This cannot be undone here.' },
+    'Discard Lines'
+  )
+  if (choice !== 'Discard Lines') {
+    return false
+  }
+  await discardPatch(root, patch)
+  return true
+}
+
+/** Branch names cannot contain spaces; GitHub Desktop turns them into dashes as you type. */
+function sanitizeBranchName(name: string): string {
+  return name.trim().replace(/\s+/g, '-')
+}
+
+export async function createBranchInteractive(root: string): Promise<boolean> {
+  const current = await getCurrentBranch(root)
+  const input = await vscode.window.showInputBox({
+    title: 'Create a branch',
+    prompt: current ? `The branch starts from "${current}". Uncommitted changes come along.` : undefined,
+    placeHolder: 'Branch name',
+    validateInput: async value => {
+      if (!value.trim()) {
+        return null
+      }
+      const name = sanitizeBranchName(value)
+      const error = await validateBranchName(root, name)
+      if (error) {
+        return error
+      }
+      return name !== value ? { message: `Will be created as ${name}`, severity: vscode.InputBoxValidationSeverity.Info } : null
+    },
+  })
+  const name = input === undefined ? '' : sanitizeBranchName(input)
+  if (!name) {
+    return false
+  }
+  const error = await validateBranchName(root, name)
+  if (error) {
+    throw new Error(error)
+  }
+  await createBranch(root, name)
+  return true
+}
+
+export async function renameBranchInteractive(root: string, branch: string): Promise<boolean> {
+  const input = await vscode.window.showInputBox({
+    title: `Rename branch ${branch}`,
+    value: branch,
+    validateInput: async value => {
+      const name = sanitizeBranchName(value)
+      return name === branch ? null : validateBranchName(root, name)
+    },
+  })
+  const name = input === undefined ? '' : sanitizeBranchName(input)
+  if (!name || name === branch) {
+    return false
+  }
+  await renameBranch(root, branch, name)
+  return true
+}
+
+/** Deletes a local branch, asking again before throwing away unmerged commits. */
+export async function deleteBranchInteractive(root: string, branch: string): Promise<boolean> {
+  const choice = await vscode.window.showWarningMessage(
+    `Delete branch ${branch}?`,
+    { modal: true, detail: 'Only the local branch is deleted; the remote branch, if any, is kept.' },
+    'Delete'
+  )
+  if (choice !== 'Delete') {
+    return false
+  }
+  try {
+    await deleteBranch(root, branch, false)
+  } catch (e) {
+    if (!/not fully merged/.test(gitErrorText(e))) {
+      throw e
+    }
+    const force = await vscode.window.showWarningMessage(
+      `${branch} has commits that are not merged into the current branch or its upstream.`,
+      { modal: true, detail: 'Deleting it may lose those commits.' },
+      'Delete Anyway'
+    )
+    if (force !== 'Delete Anyway') {
+      return false
+    }
+    await deleteBranch(root, branch, true)
+  }
+  return true
+}
+
 export async function checkoutPullRequestWithProgress(deps: PanelDeps, root: string, number: number) {
   const repo = await deps.repos.describe(root)
   if (!repo.github) {
@@ -471,11 +670,12 @@ export async function checkoutPullRequestWithProgress(deps: PanelDeps, root: str
   const branch = await vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title: `Checking out pull request #${number}…` },
     () =>
-      checkoutPullRequest(root, repo.github!.remote ?? 'origin', {
-        number,
-        headBranch: pr.headBranch,
-        fromFork: pr.fromFork,
-      })
+      checkoutPullRequest(
+        root,
+        repo.github!.remote ?? 'origin',
+        { number, headBranch: pr.headBranch, fromFork: pr.fromFork },
+        fetcher(deps, root)
+      )
   )
   vscode.window.setStatusBarMessage(`Checked out ${branch}`, 4000)
 }

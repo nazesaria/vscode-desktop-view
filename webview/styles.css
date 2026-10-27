@@ -1,6 +1,7 @@
 /*
- * Layout and proportions follow GitHub Desktop (app/styles/ui/*); colours come
- * from the active VS Code theme so the view blends in with any theme.
+ * Layout and proportions follow GitHub Desktop (app/styles/ui/*). Colours come
+ * from the active VS Code theme, unless the `desktopView.colors` setting picks
+ * GitHub Desktop's own palette (see the end of this file).
  */
 
 :root {
@@ -16,6 +17,9 @@
   --dv-selected-bg: #1f6feb;
   --dv-selected-fg: #ffffff;
   --dv-selected-inactive-bg: rgba(31, 111, 235, 0.45);
+  --dv-selected-inactive-fg: #ffffff;
+  --dv-toolbar-hover-bg: var(--dv-hover-bg);
+  --dv-toolbar-fg-muted: var(--dv-toolbar-fg);
   --dv-hover-bg: var(--vscode-list-hoverBackground);
   --dv-focus: var(--vscode-focusBorder);
   --dv-accent: var(--vscode-panelTitle-activeBorder, var(--vscode-focusBorder));
@@ -144,7 +148,7 @@ select:focus {
 
 .toolbar-button:not(.static):hover,
 .toolbar-button.open {
-  background: var(--dv-hover-bg);
+  background: var(--dv-toolbar-hover-bg);
 }
 
 .toolbar-icon {
@@ -625,7 +629,7 @@ body.resizing .resizer:hover {
 
 .list-row.selected {
   background: var(--dv-selected-inactive-bg);
-  color: var(--dv-selected-fg);
+  color: var(--dv-selected-inactive-fg);
 }
 
 .list-row.selected .path-dir,
@@ -1423,4 +1427,133 @@ body.vscode-light .hljs-tag {
 
 .line.revealed .code {
   color: var(--dv-fg);
+}
+
+/* ---------------------------------------------------------------- GitHub Desktop palette */
+
+/*
+ * Values from GitHub Desktop's app/styles/_variables.scss (light) and
+ * themes/_dark.scss, compiled. High contrast themes keep the VS Code colours.
+ */
+body[data-palette='desktop'].vscode-dark {
+  --dv-bg: #24292e;
+  --dv-sidebar-bg: #24292e;
+  --dv-toolbar-bg: #1d2125;
+  --dv-toolbar-fg: #f6f8fa;
+  --dv-toolbar-fg-muted: #959da5;
+  --dv-toolbar-hover-bg: #2f363d;
+  --dv-header-bg: #2b3137;
+  --dv-border: #141414;
+  --dv-fg: #f6f8fa;
+  --dv-fg-muted: #959da5;
+  --dv-selected-bg: #0366d6;
+  --dv-selected-fg: #ffffff;
+  --dv-selected-inactive-bg: #444d56;
+  --dv-selected-inactive-fg: #f6f8fa;
+  --dv-hover-bg: #2f363d;
+  --dv-focus: #0366d6;
+  --dv-accent: #0366d6;
+  --dv-input-bg: #1d2125;
+  --dv-input-border: #444d56;
+  --dv-add: #28a745;
+  --dv-del: #d73a49;
+  --dv-mod: #dbab09;
+  --dv-ren: #2188ff;
+  --dv-conflict: #f66a0a;
+
+  --diff-add-bg: #113a1b;
+  --diff-del-bg: #450c0f;
+  --diff-add-gutter: #0b2611;
+  --diff-del-gutter: #2f090a;
+  --diff-hunk-bg: #1d2125;
+  --diff-hunk-fg: #959da5;
+  --diff-gutter-bg: #1d2125;
+  --diff-ln-fg: #959da5;
+
+  --vscode-button-background: #0366d6;
+  --vscode-button-hoverBackground: #0372ef;
+  --vscode-button-foreground: #ffffff;
+  --vscode-badge-background: #444d56;
+  --vscode-badge-foreground: #f6f8fa;
+  --vscode-textLink-foreground: #2e8fff;
+  --vscode-editorWidget-background: #24292e;
+  --vscode-editorWidget-foreground: #f6f8fa;
+  --vscode-editorWidget-border: #141414;
+  --vscode-list-hoverBackground: #2f363d;
+  --vscode-toolbar-hoverBackground: #2f363d;
+  --vscode-icon-foreground: #f6f8fa;
+  --vscode-input-foreground: #f6f8fa;
+  --vscode-charts-green: #28a745;
+  --vscode-charts-red: #d73a49;
+  --vscode-scrollbarSlider-background: rgba(255, 255, 255, 0.2);
+  --vscode-scrollbarSlider-hoverBackground: rgba(255, 255, 255, 0.3);
+  --vscode-scrollbarSlider-activeBackground: rgba(255, 255, 255, 0.5);
+}
+
+body[data-palette='desktop'].vscode-light {
+  --dv-bg: #ffffff;
+  --dv-sidebar-bg: #ffffff;
+  /* Desktop keeps a dark toolbar in its light theme. */
+  --dv-toolbar-bg: #24292e;
+  --dv-toolbar-fg: #ffffff;
+  --dv-toolbar-fg-muted: #d1d5da;
+  --dv-toolbar-hover-bg: #2f363d;
+  --dv-header-bg: #f6f8fa;
+  --dv-border: #e1e4e8;
+  --dv-fg: #24292e;
+  --dv-fg-muted: #6a737d;
+  --dv-selected-bg: #0366d6;
+  --dv-selected-fg: #ffffff;
+  --dv-selected-inactive-bg: #ebeef1;
+  --dv-selected-inactive-fg: #24292e;
+  --dv-hover-bg: #f6f8fa;
+  --dv-focus: #0366d6;
+  --dv-accent: #0366d6;
+  --dv-input-bg: #ffffff;
+  --dv-input-border: #d1d5da;
+  --dv-add: #22863a;
+  --dv-del: #cb2431;
+  --dv-mod: #aa8507;
+  --dv-ren: #0366d6;
+  --dv-conflict: #e36209;
+
+  --diff-add-bg: #e6ffed;
+  --diff-del-bg: #ffeef0;
+  --diff-add-gutter: #cdffd8;
+  --diff-del-gutter: #ffdce0;
+  --diff-hunk-bg: #f1f8ff;
+  --diff-hunk-fg: #586069;
+  --diff-gutter-bg: #ffffff;
+  --diff-ln-fg: #444d56;
+
+  --vscode-button-background: #0366d6;
+  --vscode-button-hoverBackground: #0372ef;
+  --vscode-button-foreground: #ffffff;
+  --vscode-badge-background: #e1e4e8;
+  --vscode-badge-foreground: #24292e;
+  --vscode-textLink-foreground: #0366d6;
+  --vscode-editorWidget-background: #ffffff;
+  --vscode-editorWidget-foreground: #24292e;
+  --vscode-editorWidget-border: #e1e4e8;
+  --vscode-list-hoverBackground: #f6f8fa;
+  --vscode-toolbar-hoverBackground: #f6f8fa;
+  --vscode-icon-foreground: #24292e;
+  --vscode-input-foreground: #24292e;
+  --vscode-charts-green: #22863a;
+  --vscode-charts-red: #cb2431;
+}
+
+/* The toolbar has its own colours (dark even in the light palette). */
+.toolbar,
+.toolbar .icon-button {
+  color: var(--dv-toolbar-fg);
+}
+
+.toolbar .toolbar-label {
+  color: var(--dv-toolbar-fg-muted);
+  opacity: 1;
+}
+
+.toolbar .icon-button:hover {
+  background: var(--dv-toolbar-hover-bg);
 }

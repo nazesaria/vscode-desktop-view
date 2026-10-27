@@ -337,6 +337,9 @@ export function App() {
         case 'githubAuth':
           setSignedIn(m.signedIn)
           return
+        case 'palette':
+          document.body.dataset.palette = m.palette
+          return
         case 'setIncluded':
           live.current.setIncluded(m.paths, m.include)
           return

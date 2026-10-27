@@ -2,7 +2,7 @@
   "name": "desktop-view",
   "displayName": "Desktop View",
   "description": "GitHub Desktop style history, changes and pull request viewer for the repositories in your workspace.",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "publisher": "nazesaria",
   "license": "MIT",
   "private": true,
@@ -314,6 +314,19 @@
           "type": "number",
           "default": 3,
           "description": "Context lines around each change in local diffs."
+        },
+        "desktopView.colors": {
+          "type": "string",
+          "enum": [
+            "desktop",
+            "theme"
+          ],
+          "default": "desktop",
+          "enumDescriptions": [
+            "GitHub Desktop's colors (its dark or light theme, following VS Code's theme kind).",
+            "The colors of the current VS Code theme."
+          ],
+          "description": "Color palette of the Desktop View tabs. High contrast themes always use the theme colors."
         }
       }
     }

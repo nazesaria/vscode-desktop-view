@@ -170,6 +170,8 @@ export type HostToWebview =
   | { type: 'branches'; branches: string[]; current: string | null }
   | { type: 'branchList'; branches: BranchInfo[] }
   | { type: 'syncStatus'; status: SyncStatus }
+  /** The `desktopView.colors` setting changed. */
+  | { type: 'palette'; palette: 'desktop' | 'theme' }
   /** Includes or excludes files from the next commit (from the file list's context menu). */
   | { type: 'setIncluded'; paths: string[]; include: boolean }
   /** A push/pull/fetch started (action) or finished (null). */

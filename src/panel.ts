@@ -118,7 +118,12 @@ export class DesktopViewPanel implements vscode.Disposable {
           this.scheduleRefresh()
         }
       }),
-      deps.github.onDidChangeAuth(signedIn => this.post({ type: 'githubAuth', signedIn }))
+      deps.github.onDidChangeAuth(signedIn => this.post({ type: 'githubAuth', signedIn })),
+      vscode.workspace.onDidChangeConfiguration(e => {
+        if (e.affectsConfiguration('desktopView.colors')) {
+          this.post({ type: 'palette', palette: this.config().palette })
+        }
+      })
     )
   }
 
@@ -174,6 +179,7 @@ export class DesktopViewPanel implements vscode.Disposable {
     return {
       pageSize: Math.max(10, c.get<number>('historyPageSize', 100)),
       context: Math.max(0, c.get<number>('diffContextLines', 3)),
+      palette: c.get<'desktop' | 'theme'>('colors', 'desktop'),
     }
   }
 
@@ -406,7 +412,7 @@ export class DesktopViewPanel implements vscode.Disposable {
 <link href="${codicons}" rel="stylesheet">
 <link href="${style}" rel="stylesheet">
 </head>
-<body data-vscode-context='{"preventDefaultContextMenuItems": true}'>
+<body data-palette="${this.config().palette}" data-vscode-context='{"preventDefaultContextMenuItems": true}'>
 <div id="root"></div>
 <script nonce="${nonce}">window.__DESKTOP_VIEW_LOCALE__ = ${JSON.stringify(vscode.env.language)};</script>
 <script nonce="${nonce}" src="${script}"></script>

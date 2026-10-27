@@ -5,6 +5,11 @@
   "version": "0.4.4",
   "publisher": "nazesaria",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nazesaria/vscode-desktop-view.git"
+  },
+  "bugs": "https://github.com/nazesaria/vscode-desktop-view/issues",
   "private": true,
   "engines": {
     "vscode": "^1.90.0"
@@ -350,7 +355,7 @@
     "watch": "node esbuild.mjs --watch",
     "typecheck": "tsc --noEmit -p . && tsc --noEmit -p webview",
     "test": "node esbuild.mjs --tests && node --test out-test/",
-    "package": "npm run typecheck && node esbuild.mjs --production && vsce package --no-dependencies --allow-missing-repository -o desktop-view.vsix"
+    "package": "npm run typecheck && node esbuild.mjs --production && vsce package --no-dependencies --allow-missing-repository"
   },
   "devDependencies": {
     "@types/node": "^18.19.130",

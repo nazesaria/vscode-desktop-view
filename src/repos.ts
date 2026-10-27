@@ -1,3 +1,4 @@
+import { promises as fs } from 'fs'
 import * as path from 'path'
 import * as vscode from 'vscode'
 import { getCurrentBranch, getGitHubRepo, git } from './git'
@@ -94,10 +95,19 @@ export class RepoRegistry implements vscode.Disposable {
 
   private async scanWorkspaceFolders() {
     this.fallbackRoots.clear()
+    // Like the git extension, a repository above the workspace folder (e.g. a
+    // dotfiles repository in the home directory) only counts when allowed.
+    // With "prompt", the git extension asks and, if accepted, reports it itself.
+    const parentFolders = vscode.workspace
+      .getConfiguration('git')
+      .get<'always' | 'never' | 'prompt'>('openRepositoryInParentFolders', 'prompt')
     for (const folder of vscode.workspace.workspaceFolders ?? []) {
       try {
         const top = (await git(folder.uri.fsPath, ['rev-parse', '--show-toplevel'])).trim()
-        if (top) {
+        // git prints the resolved path, so compare against the folder's real path (symlinks).
+        const folderPath = await fs.realpath(folder.uri.fsPath).catch(() => folder.uri.fsPath)
+        const isParent = top !== '' && path.resolve(top) !== path.resolve(folderPath)
+        if (top && (!isParent || parentFolders === 'always')) {
           this.fallbackRoots.add(path.resolve(top))
         }
       } catch {

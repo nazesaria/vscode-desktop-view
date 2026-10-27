@@ -318,6 +318,7 @@ export function App() {
             return
           }
           setPrsLoading(false)
+          setPrsError(null)
           setPrsHasMore(m.hasMore)
           setPrsPage(m.page)
           setPrs(prev => (m.page === 1 ? m.items : [...prev, ...m.items.filter(p => !prev.some(q => q.number === p.number))]))

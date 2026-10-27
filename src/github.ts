@@ -18,6 +18,7 @@ export class GitHubClient {
   private readonly onDidChangeAuthEmitter = new vscode.EventEmitter<boolean>()
   readonly onDidChangeAuth = this.onDidChangeAuthEmitter.event
   private token: string | undefined
+  private sessionChecked: Promise<boolean> | undefined
   private readonly prCache = new Map<string, { updatedAt: number; commits: CommitSummary[]; files: ChangedFile[] }>()
 
   constructor(context: vscode.ExtensionContext) {
@@ -56,13 +57,18 @@ export class GitHubClient {
   }
 
   private async request<T>(path: string): Promise<{ data: T; hasNext: boolean }> {
+    // A request sent before the session is known would go out anonymously and
+    // 404 on a private repository.
+    this.sessionChecked ??= this.refreshSession(false)
+    await this.sessionChecked
+    const token = this.token
     const headers: Record<string, string> = {
       Accept: 'application/vnd.github+json',
       'X-GitHub-Api-Version': '2022-11-28',
       'User-Agent': 'vscode-desktop-view',
     }
-    if (this.token) {
-      headers.Authorization = `Bearer ${this.token}`
+    if (token) {
+      headers.Authorization = `Bearer ${token}`
     }
     const response = await fetch(`${ApiBase}${path}`, { headers })
     if (!response.ok) {
@@ -75,7 +81,7 @@ export class GitHubClient {
       } catch {
         // keep the status text
       }
-      if (response.status === 404 && !this.token) {
+      if (response.status === 404 && !token) {
         message = 'Repository not found. If it is private, sign in to GitHub.'
       }
       throw new GitHubApiError(message, response.status)
@@ -133,6 +139,8 @@ export class GitHubClient {
 
   /** Raw file contents at a commit, or null when GitHub has none (deleted, binary, too big). */
   async getFileContent(repo: GitHubRepoRef, ref: string, path: string): Promise<string | null> {
+    this.sessionChecked ??= this.refreshSession(false)
+    await this.sessionChecked
     const headers: Record<string, string> = {
       Accept: 'application/vnd.github.raw',
       'X-GitHub-Api-Version': '2022-11-28',

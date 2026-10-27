@@ -31,11 +31,18 @@ export interface GitOptions {
   input?: string
 }
 
+let gitPath = 'git'
+
+/** Uses the git executable VS Code's git extension found (the `git.path` setting, or its own search). */
+export function setGitPath(executable: string | undefined) {
+  gitPath = executable || 'git'
+}
+
 export function git(cwd: string, args: string[], options: GitOptions = {}): Promise<string> {
   const okExitCodes = options.okExitCodes ?? [0]
   return new Promise((resolve, reject) => {
     const child = execFile(
-      'git',
+      gitPath,
       // Paths are passed verbatim; never let git expand them as globs.
       ['-c', 'core.quotepath=false', '-c', 'color.ui=false', '--literal-pathspecs', ...args],
       {

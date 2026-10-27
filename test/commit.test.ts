@@ -16,6 +16,7 @@ import {
   getCommitFiles,
   getCurrentBranch,
   getFileContent,
+  getHistory,
   getWorkingChanges,
   getSyncStatus,
   getWorkingDiff,
@@ -304,4 +305,28 @@ test('sync status counts ahead/behind and remote branches check out as tracking 
   assert.equal(await checkoutBranch(repo, topic), 'topic')
   assert.equal(r('rev-parse', '--abbrev-ref', '@{upstream}').trim(), 'origin/topic')
   assert.equal((await listBranches(repo)).find(b => b.name === 'main')!.upstream, 'origin/main')
+})
+
+test('history marks the commits the remote does not have yet', async () => {
+  const flags = async () => (await getHistory(repo, 0, 10)).commits.map(c => `${c.summary}:${!!c.unpushed}`)
+  // No remote at all: nothing to push to, so nothing is flagged.
+  assert.deepEqual(await flags(), ['Initial:false'])
+
+  run(base, 'init', '-q', '--bare', '-b', 'main', 'remote.git')
+  r('remote', 'add', 'origin', join(base, 'remote.git'))
+  // Unpublished branch: every commit on no remote branch counts.
+  assert.deepEqual(await flags(), ['Initial:true'])
+
+  r('push', '-q', '-u', 'origin', 'main')
+  r('commit', '-q', '--allow-empty', '-m', 'Second')
+  r('commit', '-q', '--allow-empty', '-m', 'Third')
+  assert.deepEqual(await flags(), ['Third:true', 'Second:true', 'Initial:false'])
+
+  r('push', '-q')
+  assert.deepEqual(await flags(), ['Third:false', 'Second:false', 'Initial:false'])
+
+  // A new branch without upstream: only its own commits, not those already on origin/main.
+  r('checkout', '-q', '-b', 'feature')
+  r('commit', '-q', '--allow-empty', '-m', 'Feature')
+  assert.deepEqual(await flags(), ['Feature:true', 'Third:false', 'Second:false', 'Initial:false'])
 })

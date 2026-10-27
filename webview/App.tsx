@@ -135,6 +135,7 @@ export function App() {
 
   // Latest values for the message handler, which is registered once.
   const live = useRef({
+    syncStatus: null as SyncStatus | null,
     compareKey: '',
     selectedSha,
     selectedShas,
@@ -149,6 +150,7 @@ export function App() {
   })
   live.current = {
     ...live.current,
+    syncStatus,
     compareKey: compareBranch ? `${compareMode}:${compareBranch}` : '',
     selectedSha,
     selectedShas,
@@ -273,9 +275,20 @@ export function App() {
         case 'branchList':
           setBranchList(m.branches)
           return
-        case 'syncStatus':
+        case 'syncStatus': {
+          const before = live.current.syncStatus
           setSyncStatus(m.status)
+          // A push, pull or upstream change moves which commits count as unpushed.
+          if (
+            before &&
+            (before.ahead !== m.status.ahead || before.upstream !== m.status.upstream)
+          ) {
+            const key = live.current.compareKey
+            const [mode, ...branch] = key.split(':')
+            loadHistory(0, key ? { mode: mode as 'behind' | 'ahead', branch: branch.join(':') } : null)
+          }
           return
+        }
         case 'syncing':
           setSyncing(m.action)
           if (m.action === 'push' || m.action === 'publish') {
@@ -903,8 +916,13 @@ export function App() {
                 })}
                 renderItem={c => (
                   <>
+                    {c.unpushed ? (
+                      <span className="unpushed-badge" title="This commit hasn't been pushed to the remote repository yet">
+                        <Icon name="arrow-up" />
+                      </span>
+                    ) : null}
                     <div className="row-title" title={c.summary}>
-                      {c.summary}
+                      <span className="ellipsis">{c.summary}</span>
                       {c.refs.length > 0 ? <span className="ref-badge small">{c.refs[0]}</span> : null}
                     </div>
                     <div className="row-meta">

@@ -28,6 +28,8 @@ export interface CommitSummary {
   /** Branch and tag names pointing at this commit. */
   refs: string[]
   avatarUrl?: string
+  /** Only on the remote-less side of the current branch: not pushed yet. */
+  unpushed?: boolean
 }
 
 export type FileStatus =

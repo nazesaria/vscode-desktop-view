@@ -720,6 +720,40 @@ body.resizing .resizer:hover {
   line-height: 14px;
 }
 
+/* Desktop's "not pushed yet" pill, right-aligned across both lines of the row. */
+.commit-row {
+  position: relative;
+}
+
+.commit-row:has(.unpushed-badge) {
+  padding-right: 52px;
+}
+
+.unpushed-badge {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 18px;
+  border-radius: 9px;
+  background: var(--dv-unpushed-bg, rgba(128, 128, 128, 0.45));
+  color: var(--dv-unpushed-fg, #fff);
+}
+
+.unpushed-badge .codicon {
+  font-size: 12px;
+}
+
+.list:focus .list-row.selected .unpushed-badge,
+.list:focus-within .list-row.selected .unpushed-badge {
+  background: var(--dv-selected-fg);
+  color: var(--dv-selected-bg);
+}
+
 /* ---------------------------------------------------------------- history / compare */
 
 .branch-compare {

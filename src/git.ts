@@ -147,7 +147,36 @@ export async function getHistory(
   ])
   const commits = parseLog(output)
   const hasMore = commits.length > limit
+  const unpushed = await getUnpushedShas(root)
+  for (const commit of commits) {
+    if (unpushed.has(commit.sha)) {
+      commit.unpushed = true
+    }
+  }
   return { commits: commits.slice(0, limit), hasMore }
+}
+
+/**
+ * Commits on HEAD that the remote does not have yet: those ahead of the
+ * upstream, or for an unpublished branch those on no remote branch at all.
+ */
+export async function getUnpushedShas(root: string): Promise<Set<string>> {
+  if (!(await git(root, ['remote'])).trim()) {
+    return new Set()
+  }
+  let range: string[]
+  try {
+    await git(root, ['rev-parse', '--verify', '--quiet', '@{upstream}'])
+    range = ['@{upstream}..HEAD']
+  } catch {
+    range = ['HEAD', '--not', '--remotes']
+  }
+  try {
+    const output = await git(root, ['rev-list', '--max-count=5000', ...range])
+    return new Set(output.split('\n').filter(Boolean))
+  } catch {
+    return new Set()
+  }
 }
 
 export async function getBranches(root: string): Promise<string[]> {

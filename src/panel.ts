@@ -59,6 +59,8 @@ export class DesktopViewPanel implements vscode.Disposable {
     const panel = vscode.window.createWebviewPanel(ViewType, path.basename(root), vscode.ViewColumn.Active, {
       enableScripts: true,
       retainContextWhenHidden: true,
+      // Ctrl+F inside the tab.
+      enableFindWidget: true,
       localResourceRoots: [vscode.Uri.joinPath(deps.extensionUri, 'dist')],
     })
     new DesktopViewPanel(panel, deps, root)
@@ -500,6 +502,64 @@ export async function openDiffInEditor(deps: PanelDeps, root: string, source: Di
     return
   }
   await vscode.commands.executeCommand('vscode.diff', left, right, label, { preview: true })
+}
+
+/** Opens the working tree copy of a file, if it exists. */
+export async function openWorkingFile(root: string, filePath: string) {
+  const uri = vscode.Uri.file(path.join(root, filePath))
+  try {
+    await vscode.workspace.fs.stat(uri)
+  } catch {
+    void vscode.window.showWarningMessage(
+      `${filePath} does not exist in the working tree. Use "Open File at This Version" instead.`
+    )
+    return
+  }
+  await vscode.commands.executeCommand('vscode.open', uri)
+}
+
+/** Read-only documents for file versions that only exist on GitHub. */
+export const RevisionScheme = 'desktop-view-revision'
+const revisionContents = new Map<string, string>()
+export const revisionContentProvider: vscode.TextDocumentContentProvider = {
+  provideTextDocumentContent: uri => revisionContents.get(uri.toString()) ?? '',
+}
+
+/** Opens a file as it is in a commit or pull request (read-only). */
+export async function openFileAtRevision(deps: PanelDeps, root: string, source: DiffSource, file: ChangedFile) {
+  let ref: string
+  if (source.kind === 'working') {
+    return openWorkingFile(root, file.path)
+  } else if (source.kind === 'pr') {
+    const repo = await deps.repos.describe(root)
+    if (!repo.github) {
+      return
+    }
+    ref = (await deps.github.getPullRequest(repo.github, source.number)).pr.headSha
+  } else {
+    ref = source.sha
+  }
+  const short = ref.slice(0, 7)
+  const local = vscode.Uri.file(path.join(root, file.path))
+  if (await commitExists(root, ref)) {
+    const uri = deps.repos.toGitUri(local, ref)
+    if (uri) {
+      await vscode.commands.executeCommand('vscode.open', uri, { preview: true }, `${path.basename(file.path)} (${short})`)
+      return
+    }
+  }
+  // Not fetched locally: read it from GitHub.
+  const repo = await deps.repos.describe(root)
+  const text = repo.github ? await deps.github.getFileContent(repo.github, ref, file.path) : null
+  if (text === null) {
+    void vscode.window.showWarningMessage(`Could not load ${file.path} at ${short} (binary, too large or not available).`)
+    return
+  }
+  // The file name stays last in the path so VS Code picks the language from it.
+  const uri = vscode.Uri.from({ scheme: RevisionScheme, path: `/${short}/${file.path}` })
+  revisionContents.set(uri.toString(), text)
+  const doc = await vscode.workspace.openTextDocument(uri)
+  await vscode.window.showTextDocument(doc, { preview: true })
 }
 
 /**

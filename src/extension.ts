@@ -9,7 +9,11 @@ import {
   discardChanges,
   gitErrorText,
   openDiffInEditor,
+  openFileAtRevision,
+  openWorkingFile,
   PanelDeps,
+  RevisionScheme,
+  revisionContentProvider,
   renameBranchInteractive,
   ViewType,
 } from './panel'
@@ -103,9 +107,20 @@ export async function activate(context: vscode.ExtensionContext) {
   command('desktopView.ctx.openPullRequestOnGitHub', (a: WebviewContextArgs) => a.url && vscode.env.openExternal(vscode.Uri.parse(a.url)))
   command('desktopView.ctx.openFile', (a: WebviewContextArgs) => {
     if (a.root && a.path) {
-      return vscode.commands.executeCommand('vscode.open', vscode.Uri.file(path.join(a.root, a.path)))
+      return openWorkingFile(a.root, a.path)
     }
   })
+  command('desktopView.ctx.openFileAtRevision', async (a: WebviewContextArgs) => {
+    if (a.root && a.diff) {
+      const { source, file } = JSON.parse(a.diff) as { source: DiffSource; file: ChangedFile }
+      try {
+        await openFileAtRevision(deps, a.root, source, file)
+      } catch (e) {
+        void vscode.window.showErrorMessage(gitErrorText(e))
+      }
+    }
+  })
+  context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider(RevisionScheme, revisionContentProvider))
   command('desktopView.ctx.revealInExplorer', (a: WebviewContextArgs) => {
     if (a.root && a.path) {
       return vscode.commands.executeCommand('revealInExplorer', vscode.Uri.file(path.join(a.root, a.path)))

@@ -48,7 +48,6 @@ export function Checkbox(props: { state: CheckState; onToggle: () => void; title
 
 export function FileList(props: FileListProps) {
   const { checks } = props
-  const local = props.source.kind === 'commit' || props.source.kind === 'working'
   const working = props.source.kind === 'working'
   const count = `${props.files.length} changed file${props.files.length === 1 ? '' : 's'}`
   return (
@@ -88,7 +87,9 @@ export function FileList(props: FileListProps) {
             webviewSection: 'file',
             root: props.root,
             path: f.path,
-            desktopViewLocalFile: local && f.status !== 'deleted',
+            // The file may exist on disk even when the list shows a commit or pull request.
+            desktopViewLocalFile: f.status !== 'deleted',
+            desktopViewRevision: !working && f.status !== 'deleted',
             desktopViewWorking: working,
             desktopViewMulti: selected !== null,
             diff: JSON.stringify({ source: props.source, file }),

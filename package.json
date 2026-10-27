@@ -2,7 +2,7 @@
   "name": "desktop-view",
   "displayName": "Desktop View",
   "description": "GitHub Desktop style history, changes and pull request viewer for the repositories in your workspace.",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "publisher": "nazesaria",
   "license": "MIT",
   "private": true,
@@ -125,6 +125,11 @@
         "command": "desktopView.ctx.excludeSelected",
         "title": "Exclude from Commit",
         "category": "Desktop View"
+      },
+      {
+        "command": "desktopView.ctx.openFileAtRevision",
+        "title": "Open File at This Version",
+        "category": "Desktop View"
       }
     ],
     "menus": {
@@ -210,6 +215,10 @@
         {
           "command": "desktopView.ctx.excludeSelected",
           "when": "false"
+        },
+        {
+          "command": "desktopView.ctx.openFileAtRevision",
+          "when": "false"
         }
       ],
       "webview/context": [
@@ -231,12 +240,12 @@
         {
           "command": "desktopView.ctx.openDiffInEditor",
           "when": "webviewId == desktopView && webviewSection == file && !desktopViewMulti",
-          "group": "2_open@2"
+          "group": "2_open@3"
         },
         {
           "command": "desktopView.ctx.revealInExplorer",
           "when": "webviewId == desktopView && webviewSection == file && desktopViewLocalFile && !desktopViewMulti",
-          "group": "2_open@3"
+          "group": "2_open@4"
         },
         {
           "command": "desktopView.ctx.copyPath",
@@ -292,6 +301,11 @@
           "command": "desktopView.ctx.excludeSelected",
           "when": "webviewId == desktopView && webviewSection == file && desktopViewWorking",
           "group": "4_commit@2"
+        },
+        {
+          "command": "desktopView.ctx.openFileAtRevision",
+          "when": "webviewId == desktopView && webviewSection == file && desktopViewRevision && !desktopViewMulti",
+          "group": "2_open@2"
         }
       ]
     },

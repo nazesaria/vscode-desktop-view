@@ -30,6 +30,8 @@ export interface ContextSource {
 
 interface DiffViewProps {
   file: ChangedFile | null
+  /** Shown when no file is selected, instead of the default hint. */
+  emptyText?: string
   state: DiffState | null
   options: DiffOptions
   /** GitHub patches can't be re-requested without whitespace. */
@@ -52,7 +54,7 @@ export function DiffView(props: DiffViewProps) {
   if (!props.file) {
     return (
       <div className="diff-view">
-        <Placeholder icon="diff">Select a file to see its changes</Placeholder>
+        <Placeholder icon="diff">{props.emptyText ?? 'Select a file to see its changes'}</Placeholder>
       </div>
     )
   }

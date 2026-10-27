@@ -22,6 +22,9 @@ interface FileListProps {
   onOpenDiff: (file: ChangedFile) => void
   header?: React.ReactNode
   checks?: FileChecks
+  /** Enables Ctrl/Shift multi-selection. */
+  selectedPaths?: ReadonlyArray<string>
+  onMultiSelect?: (files: ChangedFile[], focus: ChangedFile) => void
 }
 
 export function Checkbox(props: { state: CheckState; onToggle: () => void; title: string }) {
@@ -72,15 +75,24 @@ export function FileList(props: FileListProps) {
         onActivate={props.onOpenDiff}
         rowClassName="file-row"
         emptyText="No changed files"
+        multiSelectedKeys={props.selectedPaths}
+        onMultiSelect={props.onMultiSelect}
         getContext={f => {
           const { patch, ...file } = f
+          // Right click on one of several selected rows acts on all of them.
+          const selected =
+            props.selectedPaths && props.selectedPaths.length > 1 && props.selectedPaths.includes(f.path)
+              ? props.files.filter(g => props.selectedPaths!.includes(g.path)).map(({ patch, ...g }) => g)
+              : null
           return {
             webviewSection: 'file',
             root: props.root,
             path: f.path,
             desktopViewLocalFile: local && f.status !== 'deleted',
             desktopViewWorking: working,
+            desktopViewMulti: selected !== null,
             diff: JSON.stringify({ source: props.source, file }),
+            files: JSON.stringify(selected ?? [file]),
           }
         }}
         renderItem={f => (

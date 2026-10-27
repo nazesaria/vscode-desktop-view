@@ -2,7 +2,7 @@
   "name": "desktop-view",
   "displayName": "Desktop View",
   "description": "GitHub Desktop style history, changes and pull request viewer for the repositories in your workspace.",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "publisher": "nazesaria",
   "license": "MIT",
   "private": true,
@@ -58,7 +58,7 @@
       },
       {
         "command": "desktopView.ctx.copyPath",
-        "title": "Copy File Path",
+        "title": "Copy Path",
         "category": "Desktop View"
       },
       {
@@ -109,6 +109,21 @@
       {
         "command": "desktopView.ctx.copyBranchName",
         "title": "Copy Branch Name",
+        "category": "Desktop View"
+      },
+      {
+        "command": "desktopView.ctx.discardSelected",
+        "title": "Discard Selected Changes...",
+        "category": "Desktop View"
+      },
+      {
+        "command": "desktopView.ctx.includeSelected",
+        "title": "Include in Commit",
+        "category": "Desktop View"
+      },
+      {
+        "command": "desktopView.ctx.excludeSelected",
+        "title": "Exclude from Commit",
         "category": "Desktop View"
       }
     ],
@@ -183,6 +198,18 @@
         {
           "command": "desktopView.ctx.copyBranchName",
           "when": "false"
+        },
+        {
+          "command": "desktopView.ctx.discardSelected",
+          "when": "false"
+        },
+        {
+          "command": "desktopView.ctx.includeSelected",
+          "when": "false"
+        },
+        {
+          "command": "desktopView.ctx.excludeSelected",
+          "when": "false"
         }
       ],
       "webview/context": [
@@ -198,17 +225,17 @@
         },
         {
           "command": "desktopView.ctx.openFile",
-          "when": "webviewId == desktopView && webviewSection == file && desktopViewLocalFile",
+          "when": "webviewId == desktopView && webviewSection == file && desktopViewLocalFile && !desktopViewMulti",
           "group": "2_open@1"
         },
         {
           "command": "desktopView.ctx.openDiffInEditor",
-          "when": "webviewId == desktopView && webviewSection == file",
+          "when": "webviewId == desktopView && webviewSection == file && !desktopViewMulti",
           "group": "2_open@2"
         },
         {
           "command": "desktopView.ctx.revealInExplorer",
-          "when": "webviewId == desktopView && webviewSection == file && desktopViewLocalFile",
+          "when": "webviewId == desktopView && webviewSection == file && desktopViewLocalFile && !desktopViewMulti",
           "group": "2_open@3"
         },
         {
@@ -223,7 +250,7 @@
         },
         {
           "command": "desktopView.ctx.discard",
-          "when": "webviewId == desktopView && webviewSection == file && desktopViewWorking",
+          "when": "webviewId == desktopView && webviewSection == file && desktopViewWorking && !desktopViewMulti",
           "group": "3_discard@1"
         },
         {
@@ -250,6 +277,21 @@
           "command": "desktopView.ctx.deleteBranch",
           "when": "webviewId == desktopView && webviewSection == branch && !desktopViewRemoteBranch && !desktopViewCurrentBranch",
           "group": "2_edit@2"
+        },
+        {
+          "command": "desktopView.ctx.discardSelected",
+          "when": "webviewId == desktopView && webviewSection == file && desktopViewWorking && desktopViewMulti",
+          "group": "3_discard@1"
+        },
+        {
+          "command": "desktopView.ctx.includeSelected",
+          "when": "webviewId == desktopView && webviewSection == file && desktopViewWorking",
+          "group": "4_commit@1"
+        },
+        {
+          "command": "desktopView.ctx.excludeSelected",
+          "when": "webviewId == desktopView && webviewSection == file && desktopViewWorking",
+          "group": "4_commit@2"
         }
       ]
     },

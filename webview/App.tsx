@@ -87,6 +87,8 @@ export function App() {
   // Changes
   const [changes, setChanges] = useState<ChangedFile[] | null>(null)
   const [changePath, setChangePath] = useState<string | null>(null)
+  /** All selected changes (Ctrl/Shift click); the diff shows only when exactly one is. */
+  const [changePaths, setChangePaths] = useState<string[]>([])
   const [excludedFiles, setExcludedFiles] = useState<ReadonlySet<string>>(new Set())
   const [lineExclusions, setLineExclusions] = useState<ReadonlyMap<string, LineExclusion>>(new Map())
   const [summary, setSummaryValue] = useState(persisted.commitSummary ?? '')
@@ -143,6 +145,7 @@ export function App() {
     prState,
     commits,
     lastCommitSha: null as string | null,
+    setIncluded: (_paths: string[], _include: boolean) => {},
   })
   live.current = {
     ...live.current,
@@ -199,6 +202,7 @@ export function App() {
     setSyncing(null)
     setChanges(null)
     setChangePath(null)
+    setChangePaths([])
     setCommits([])
     setHistoryHasMore(false)
     setCompareBranch(null)
@@ -333,6 +337,9 @@ export function App() {
         case 'githubAuth':
           setSignedIn(m.signedIn)
           return
+        case 'setIncluded':
+          live.current.setIncluded(m.paths, m.include)
+          return
         case 'repoChanged':
           post({ type: 'loadChanges' })
           if (live.current.lastCommitSha && m.head !== live.current.lastCommitSha) {
@@ -399,8 +406,15 @@ export function App() {
   }, [tab, commits])
 
   useEffect(() => {
-    if (changes && changes.length > 0 && (changePath === null || !changes.some(f => f.path === changePath))) {
+    if (!changes) {
+      return
+    }
+    const remaining = changePaths.filter(p => changes.some(f => f.path === p))
+    if (changes.length > 0 && (changePath === null || !changes.some(f => f.path === changePath))) {
       setChangePath(changes[0].path)
+      setChangePaths([changes[0].path])
+    } else if (remaining.length !== changePaths.length) {
+      setChangePaths(remaining.length > 0 ? remaining : changePath ? [changePath] : [])
     }
   }, [changes])
 
@@ -514,7 +528,7 @@ export function App() {
 
   const target: DiffTarget | null = useMemo(() => {
     if (tab === 'changes') {
-      const file = changes?.find(f => f.path === changePath)
+      const file = changePaths.length > 1 ? undefined : changes?.find(f => f.path === changePath)
       return file ? { source: { kind: 'working' }, file } : null
     }
     if (tab === 'history') {
@@ -535,7 +549,7 @@ export function App() {
       source: prCommit ? { kind: 'prCommit', number: selectedPr, sha: prCommit } : { kind: 'pr', number: selectedPr },
       file,
     }
-  }, [tab, changes, changePath, commitFiles, selectedSha, selectedShas, commitFilePath, prFiles, prFilePath, selectedPr, prCommit])
+  }, [tab, changes, changePath, changePaths, commitFiles, selectedSha, selectedShas, commitFilePath, prFiles, prFilePath, selectedPr, prCommit])
 
   const isLocalSource = target?.source.kind === 'commit' || target?.source.kind === 'working'
   const targetKey = target
@@ -616,6 +630,7 @@ export function App() {
     setExcludedFiles(files)
     setLineExclusions(lines)
   }
+  live.current.setIncluded = setFileIncluded
 
   const fileChecks: FileChecks | undefined = changes
     ? {
@@ -729,6 +744,7 @@ export function App() {
   const diffView = (
     <DiffView
       file={target?.file ?? null}
+      emptyText={tab === 'changes' && changePaths.length > 1 ? `${changePaths.length} files selected` : undefined}
       state={diff}
       options={diffOptions}
       whitespaceSupported={isLocalSource}
@@ -817,7 +833,15 @@ export function App() {
                   files={changes}
                   source={{ kind: 'working' }}
                   selectedPath={changePath}
-                  onSelect={f => setChangePath(f.path)}
+                  onSelect={f => {
+                    setChangePath(f.path)
+                    setChangePaths([f.path])
+                  }}
+                  selectedPaths={changePaths}
+                  onMultiSelect={(files, focus) => {
+                    setChangePath(focus.path)
+                    setChangePaths(files.map(f => f.path))
+                  }}
                   onOpenDiff={() => openInEditor()}
                   header={`${changes.length} changed file${changes.length === 1 ? '' : 's'}`}
                   checks={fileChecks}

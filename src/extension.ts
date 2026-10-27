@@ -23,6 +23,8 @@ interface WebviewContextArgs {
   url?: string
   path?: string
   diff?: string
+  /** JSON array of the selected files (just the clicked one when a single row is selected). */
+  files?: string
   number?: number
   branch?: string
 }
@@ -92,7 +94,11 @@ export async function activate(context: vscode.ExtensionContext) {
 
   // Context menu entries contributed to `webview/context`.
   command('desktopView.ctx.copySha', (a: WebviewContextArgs) => a.sha && vscode.env.clipboard.writeText(a.sha))
-  command('desktopView.ctx.copyPath', (a: WebviewContextArgs) => a.path && vscode.env.clipboard.writeText(a.path))
+  const contextFiles = (a: WebviewContextArgs): ChangedFile[] => (a.files ? JSON.parse(a.files) : [])
+  command('desktopView.ctx.copyPath', (a: WebviewContextArgs) => {
+    const paths = a.files ? contextFiles(a).map(f => f.path) : a.path ? [a.path] : []
+    return paths.length > 0 && vscode.env.clipboard.writeText(paths.join('\n'))
+  })
   command('desktopView.ctx.openCommitOnGitHub', (a: WebviewContextArgs) => a.url && vscode.env.openExternal(vscode.Uri.parse(a.url)))
   command('desktopView.ctx.openPullRequestOnGitHub', (a: WebviewContextArgs) => a.url && vscode.env.openExternal(vscode.Uri.parse(a.url)))
   command('desktopView.ctx.openFile', (a: WebviewContextArgs) => {
@@ -118,6 +124,18 @@ export async function activate(context: vscode.ExtensionContext) {
       await discardChanges(a.root, [file])
     }
   })
+  command('desktopView.ctx.discardSelected', async (a: WebviewContextArgs) => {
+    if (a.root) {
+      await discardChanges(a.root, contextFiles(a))
+    }
+  })
+  const setIncluded = (include: boolean) => (a: WebviewContextArgs) => {
+    if (a.root) {
+      DesktopViewPanel.setIncluded(a.root, contextFiles(a).map(f => f.path), include)
+    }
+  }
+  command('desktopView.ctx.includeSelected', setIncluded(true))
+  command('desktopView.ctx.excludeSelected', setIncluded(false))
   command('desktopView.ctx.discardAll', async (a: WebviewContextArgs) => {
     if (a.root) {
       await discardChanges(a.root, await getWorkingChanges(a.root))

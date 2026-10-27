@@ -82,6 +82,14 @@ export class DesktopViewPanel implements vscode.Disposable {
     }
   }
 
+  static setIncluded(root: string, paths: string[], include: boolean) {
+    for (const panel of DesktopViewPanel.panels) {
+      if (panel.root === root) {
+        panel.post({ type: 'setIncluded', paths, include })
+      }
+    }
+  }
+
   private readonly disposables: vscode.Disposable[] = []
   private lastHead: string | null | undefined
   private lastBranch: string | null | undefined

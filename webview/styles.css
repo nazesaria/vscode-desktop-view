@@ -12,9 +12,10 @@
   --dv-border: var(--vscode-panel-border, var(--vscode-widget-border, rgba(128, 128, 128, 0.35)));
   --dv-fg: var(--vscode-foreground);
   --dv-fg-muted: var(--vscode-descriptionForeground);
-  --dv-selected-bg: var(--vscode-list-activeSelectionBackground);
-  --dv-selected-fg: var(--vscode-list-activeSelectionForeground, var(--vscode-foreground));
-  --dv-selected-inactive-bg: var(--vscode-list-inactiveSelectionBackground);
+  /* GitHub Desktop's blue: theme selection colors are often too close to the background. */
+  --dv-selected-bg: #1f6feb;
+  --dv-selected-fg: #ffffff;
+  --dv-selected-inactive-bg: rgba(31, 111, 235, 0.45);
   --dv-hover-bg: var(--vscode-list-hoverBackground);
   --dv-focus: var(--vscode-focusBorder);
   --dv-accent: var(--vscode-panelTitle-activeBorder, var(--vscode-focusBorder));
@@ -22,7 +23,8 @@
   --dv-input-border: var(--vscode-input-border, var(--dv-border));
   --dv-add: var(--vscode-gitDecoration-addedResourceForeground, #81b88b);
   --dv-del: var(--vscode-gitDecoration-deletedResourceForeground, #c74e39);
-  --dv-mod: var(--vscode-gitDecoration-modifiedResourceForeground, #e2c08d);
+  /* Fixed like Desktop: some themes color modified files blue. */
+  --dv-mod: #d0b44c;
   --dv-ren: var(--vscode-gitDecoration-renamedResourceForeground, #73c991);
   --dv-conflict: var(--vscode-gitDecoration-conflictingResourceForeground, #e4676b);
 
@@ -160,6 +162,9 @@ select:focus {
 .toolbar-label {
   font-size: 11px;
   opacity: 0.7;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .toolbar-value {
@@ -620,6 +625,13 @@ body.resizing .resizer:hover {
 
 .list-row.selected {
   background: var(--dv-selected-inactive-bg);
+  color: var(--dv-selected-fg);
+}
+
+.list-row.selected .path-dir,
+.list-row.selected .row-meta {
+  color: inherit;
+  opacity: 0.8;
 }
 
 .list:focus .list-row.selected,

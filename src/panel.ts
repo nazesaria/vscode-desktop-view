@@ -1,6 +1,8 @@
+import { FSWatcher, watch } from 'fs'
 import * as path from 'path'
 import * as vscode from 'vscode'
 import {
+  absoluteGitDir,
   canUndoLastCommit,
   checkoutBranch,
   checkoutPullRequest,
@@ -96,6 +98,7 @@ export class DesktopViewPanel implements vscode.Disposable {
   private lastHead: string | null | undefined
   private lastBranch: string | null | undefined
   private refreshTimer: NodeJS.Timeout | undefined
+  private gitDirWatchers: FSWatcher[] = []
 
   private constructor(
     private readonly panel: vscode.WebviewPanel,
@@ -120,6 +123,11 @@ export class DesktopViewPanel implements vscode.Disposable {
           this.scheduleRefresh()
         }
       }),
+      panel.onDidChangeViewState(e => {
+        if (e.webviewPanel.visible) {
+          this.scheduleRefresh()
+        }
+      }),
       deps.github.onDidChangeAuth(signedIn => this.post({ type: 'githubAuth', signedIn })),
       vscode.workspace.onDidChangeConfiguration(e => {
         if (e.affectsConfiguration('desktopView.colors')) {
@@ -127,6 +135,48 @@ export class DesktopViewPanel implements vscode.Disposable {
         }
       })
     )
+    void this.watchGitDir()
+  }
+
+  /**
+   * The git extension holds back its change events while the window is unfocused
+   * or busy, so a commit made from a terminal could take long to show up. Every
+   * commit, checkout, reset, pull, push and fetch writes under .git/logs (or
+   * FETCH_HEAD); the index is left out, since our own `git status` rewrites it.
+   */
+  private async watchGitDir() {
+    this.gitDirWatchers.forEach(w => w.close())
+    this.gitDirWatchers = []
+    const root = this.root
+    let gitDir: string
+    try {
+      gitDir = await absoluteGitDir(root)
+    } catch {
+      return
+    }
+    if (root !== this.root || !DesktopViewPanel.panels.has(this)) {
+      return
+    }
+    const add = (dir: string, recursive: boolean, filter?: (name: string) => boolean) => {
+      try {
+        const watcher = watch(dir, { recursive }, (_event, name) => {
+          if (!filter || (name && filter(name.toString()))) {
+            this.scheduleRefresh()
+          }
+        })
+        watcher.on('error', () => watcher.close())
+        this.gitDirWatchers.push(watcher)
+        return true
+      } catch {
+        return false
+      }
+    }
+    const logs = path.join(gitDir, 'logs')
+    // Recursive watching needs Node 20 on Linux; without it, HEAD's own log still covers commits.
+    if (!add(logs, true)) {
+      add(logs, false)
+    }
+    add(gitDir, false, name => name === 'HEAD' || name === 'FETCH_HEAD')
   }
 
   get repositoryRoot() {
@@ -221,6 +271,7 @@ export class DesktopViewPanel implements vscode.Disposable {
           return
         }
         this.root = message.root
+        void this.watchGitDir()
         await this.rememberHead()
         this.updateTitle()
         const repos = await this.deps.repos.describeAll()
@@ -425,6 +476,8 @@ export class DesktopViewPanel implements vscode.Disposable {
   dispose() {
     DesktopViewPanel.panels.delete(this)
     clearTimeout(this.refreshTimer)
+    this.gitDirWatchers.forEach(w => w.close())
+    this.gitDirWatchers = []
     this.disposables.forEach(d => d.dispose())
     this.disposables.length = 0
   }

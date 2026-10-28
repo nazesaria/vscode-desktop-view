@@ -440,7 +440,7 @@ export interface CommitEntry {
   patch?: string
 }
 
-async function absoluteGitDir(root: string): Promise<string> {
+export async function absoluteGitDir(root: string): Promise<string> {
   return (await git(root, ['rev-parse', '--absolute-git-dir'])).trim()
 }
 

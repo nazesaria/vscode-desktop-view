@@ -48,7 +48,10 @@ export function git(cwd: string, args: string[], options: GitOptions = {}): Prom
       {
         cwd,
         maxBuffer: 256 * 1024 * 1024,
-        env: { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C', ...options.env },
+        // GIT_OPTIONAL_LOCKS=0: `git status` would otherwise rewrite .git/index (taking
+        // index.lock), which the git extension sees as a change and answers with its own
+        // status, which makes us refresh again: an endless loop holding the lock.
+        env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C', ...options.env },
       },
       (error, stdout, stderr) => {
         const code = error ? (typeof error.code === 'number' ? error.code : null) : 0

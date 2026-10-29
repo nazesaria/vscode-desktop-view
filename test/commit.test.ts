@@ -1,7 +1,7 @@
 import { test, beforeEach, afterEach } from 'node:test'
 import * as assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { repositoryQualifiers } from '../src/repo-names'
@@ -365,4 +365,15 @@ test('sync status offers Undo only for a local, non-merge HEAD commit', async ()
   r('remote', 'add', 'origin', join(base, 'remote.git'))
   r('push', '-q', '-u', 'origin', 'main')
   assert.equal((await getSyncStatus(repo)).undoable, null)
+})
+
+test('reading the status leaves .git/index alone, so it never fights the git extension for index.lock', async () => {
+  const index = join(repo, '.git', 'index')
+  // Make the index stale, the case where a plain `git status` rewrites it.
+  const old = new Date(Date.now() - 60_000)
+  utimesSync(join(repo, 'b.txt'), new Date(), new Date())
+  utimesSync(index, old, old)
+  const before = statSync(index).mtimeMs
+  await getWorkingChanges(repo)
+  assert.equal(statSync(index).mtimeMs, before)
 })

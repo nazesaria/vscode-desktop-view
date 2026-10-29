@@ -18,6 +18,7 @@ import {
   ViewType,
 } from './panel'
 import { ChangedFile, DiffSource } from './protocol'
+import { repositoryQualifiers } from './repo-names'
 import { RepoRegistry } from './repos'
 
 /** Payload attached to list items through `data-vscode-context` in the webview. */
@@ -53,6 +54,7 @@ export async function activate(context: vscode.ExtensionContext) {
   await whenReady()
 
   const pickRepository = async (): Promise<string | undefined> => {
+    await repos.rescan()
     const roots = repos.roots
     if (roots.length === 0) {
       void vscode.window.showInformationMessage('Desktop View: no git repositories found in this workspace.')
@@ -62,9 +64,10 @@ export async function activate(context: vscode.ExtensionContext) {
       return roots[0]
     }
     const active = repos.activeRoot
+    const qualifiers = repositoryQualifiers(roots)
     const items = roots.map(root => ({
       label: path.basename(root),
-      description: root === active ? 'active editor' : undefined,
+      description: [qualifiers.get(root), root === active ? 'active editor' : undefined].filter(Boolean).join(' · ') || undefined,
       detail: root,
       root,
     }))

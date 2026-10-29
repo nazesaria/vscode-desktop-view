@@ -764,5 +764,14 @@ export async function getSyncStatus(root: string): Promise<SyncStatus> {
     ahead,
     behind,
     lastFetched,
+    undoable: await getUndoableCommit(root),
   }
+}
+
+async function getUndoableCommit(root: string): Promise<SyncStatus['undoable']> {
+  if (!(await canUndoLastCommit(root))) {
+    return null
+  }
+  const [sha, date, summary] = (await git(root, ['log', '-1', '--format=%H%x1f%ct%x1f%s', 'HEAD'])).trim().split('\x1f')
+  return { sha, summary, date: Number(date) * 1000 }
 }

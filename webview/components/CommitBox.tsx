@@ -1,5 +1,6 @@
 import React from 'react'
-import { Icon } from './Common'
+import { relativeTime } from '../format'
+import { Icon, useMinuteTick } from './Common'
 
 interface CommitBoxProps {
   summary: string
@@ -63,11 +64,12 @@ export function CommitBox(props: CommitBoxProps) {
   )
 }
 
-export function UndoBar(props: { summary: string; onUndo: () => void }) {
+export function UndoBar(props: { summary: string; date: number; onUndo: () => void }) {
+  useMinuteTick()
   return (
     <div className="undo-bar">
       <div className="undo-text">
-        <span className="undo-label">Committed just now</span>
+        <span className="undo-label">Committed: {relativeTime(props.date)}</span>
         <span className="ellipsis" title={props.summary}>
           {props.summary}
         </span>

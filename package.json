@@ -2,7 +2,7 @@
   "name": "desktop-view",
   "displayName": "Desktop View",
   "description": "GitHub Desktop style history, changes and pull request viewer for the repositories in your workspace.",
-  "version": "0.4.6",
+  "version": "0.5.0",
   "publisher": "nazesaria",
   "license": "MIT",
   "repository": {
@@ -324,6 +324,12 @@
     "configuration": {
       "title": "Desktop View",
       "properties": {
+        "desktopView.repositoryScanDepth": {
+          "type": "number",
+          "default": 4,
+          "minimum": 0,
+          "description": "How many folder levels below each workspace folder to look for git repositories. Folders in git.repositoryScanIgnoredFolders, node_modules and hidden folders are skipped."
+        },
         "desktopView.historyPageSize": {
           "type": "number",
           "default": 100,

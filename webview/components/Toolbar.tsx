@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { BranchInfo, RepoInfo, SyncAction, SyncStatus } from '../../src/protocol'
 import { relativeTime } from '../format'
 import { post } from '../vscode-api'
-import { Icon, IconButton } from './Common'
+import { Icon, IconButton, useMinuteTick } from './Common'
 
 function usePopover() {
   const [open, setOpen] = useState(false)
@@ -41,7 +41,9 @@ export function Toolbar(props: ToolbarProps) {
   const { open, setOpen, ref } = usePopover()
   const [filter, setFilter] = useState('')
   const [active, setActive] = useState(0)
-  const filtered = props.repos.filter(r => r.name.toLowerCase().includes(filter.toLowerCase()))
+  const filtered = props.repos.filter(r =>
+    `${r.name} ${r.qualifier ?? ''}`.toLowerCase().includes(filter.toLowerCase())
+  )
 
   const choose = (repo: RepoInfo, newTab: boolean) => {
     setOpen(false)
@@ -71,7 +73,10 @@ export function Toolbar(props: ToolbarProps) {
           <Icon name="repo" className="toolbar-icon" />
           <span className="toolbar-text">
             <span className="toolbar-label">Current repository</span>
-            <span className="toolbar-value">{props.current.name}</span>
+            <span className="toolbar-value">
+              {props.current.name}
+              {props.current.qualifier ? <span className="repo-qualifier"> · {props.current.qualifier}</span> : null}
+            </span>
           </span>
           <Icon name={open ? 'chevron-up' : 'chevron-down'} className="toolbar-chevron" />
         </button>
@@ -98,7 +103,10 @@ export function Toolbar(props: ToolbarProps) {
                   title={repo.root}
                 >
                   <Icon name={repo.github ? 'github' : 'repo'} />
-                  <span className="repo-name">{repo.name}</span>
+                  <span className="repo-name">
+                    {repo.name}
+                    {repo.qualifier ? <span className="repo-qualifier"> · {repo.qualifier}</span> : null}
+                  </span>
                   {repo.branch ? <span className="repo-branch">{repo.branch}</span> : null}
                   {repo.root !== props.current.root ? (
                     <IconButton
@@ -120,6 +128,7 @@ export function Toolbar(props: ToolbarProps) {
       <BranchDropdown root={props.current.root} current={props.current.branch} branches={props.branches} />
       <SyncButton status={props.sync} syncing={props.syncing} />
       <span className="spacer" />
+      <IconButton icon="terminal" title="Open in Terminal" onClick={() => post({ type: 'openTerminal' })} />
       <IconButton icon="refresh" title="Refresh" onClick={props.onRefresh} />
     </div>
   )
@@ -235,15 +244,6 @@ function BranchDropdown(props: { root: string; current: string | null; branches:
       ) : null}
     </div>
   )
-}
-
-/** Re-renders every minute so "Last fetched … ago" stays current. */
-function useMinuteTick() {
-  const [, setTick] = useState(0)
-  useEffect(() => {
-    const timer = setInterval(() => setTick(t => t + 1), 60_000)
-    return () => clearInterval(timer)
-  }, [])
 }
 
 const SyncingLabels: Record<SyncAction, string> = {

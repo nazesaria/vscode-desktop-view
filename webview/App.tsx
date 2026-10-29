@@ -94,7 +94,7 @@ export function App() {
   const [summary, setSummaryValue] = useState(persisted.commitSummary ?? '')
   const [description, setDescriptionValue] = useState(persisted.commitDescription ?? '')
   const [committing, setCommitting] = useState(false)
-  const [lastCommit, setLastCommit] = useState<{ sha: string; summary: string } | null>(null)
+  const [lastCommit, setLastCommit] = useState<SyncStatus['undoable']>(null)
 
   // History
   const [commits, setCommits] = useState<CommitSummary[]>([])
@@ -278,6 +278,8 @@ export function App() {
         case 'syncStatus': {
           const before = live.current.syncStatus
           setSyncStatus(m.status)
+          // Like Desktop, Undo is offered for any local-only HEAD commit, wherever it was made.
+          setLastCommit(m.status.undoable)
           // A push, pull or upstream change moves which commits count as unpushed.
           if (
             before &&
@@ -311,7 +313,7 @@ export function App() {
           setDescription('')
           setExcludedFiles(new Set())
           setLineExclusions(new Map())
-          setLastCommit(m.canUndo ? { sha: m.sha, summary: m.summary } : null)
+          setLastCommit(m.canUndo ? { sha: m.sha, summary: m.summary, date: Date.now() } : null)
           return
         case 'commitDone':
           setCommitting(false)
@@ -863,7 +865,7 @@ export function App() {
                   header={`${changes.length} changed file${changes.length === 1 ? '' : 's'}`}
                   checks={fileChecks}
                 />
-                {lastCommit ? <UndoBar summary={lastCommit.summary} onUndo={() => post({ type: 'undoLastCommit' })} /> : null}
+                {lastCommit ? <UndoBar summary={lastCommit.summary} date={lastCommit.date} onUndo={() => post({ type: 'undoLastCommit' })} /> : null}
                 <CommitBox
                   summary={summary}
                   description={description}

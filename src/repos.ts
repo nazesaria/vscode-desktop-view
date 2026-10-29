@@ -3,6 +3,7 @@ import * as path from 'path'
 import * as vscode from 'vscode'
 import { getCurrentBranch, getGitHubRepo, git, setGitPath } from './git'
 import { RepoInfo } from './protocol'
+import { repositoryQualifiers } from './repo-names'
 
 // Minimal slice of the built-in git extension API (extensions/git/src/api/git.d.ts).
 interface GitRepositoryState {
@@ -109,13 +110,14 @@ export class RepoRegistry implements vscode.Disposable {
   }
 
   private async scanWorkspaceFolders() {
-    this.fallbackRoots.clear()
+    const found = new Set<string>()
+    const gitConfig = vscode.workspace.getConfiguration('git')
     // Like the git extension, a repository above the workspace folder (e.g. a
     // dotfiles repository in the home directory) only counts when allowed.
     // With "prompt", the git extension asks and, if accepted, reports it itself.
-    const parentFolders = vscode.workspace
-      .getConfiguration('git')
-      .get<'always' | 'never' | 'prompt'>('openRepositoryInParentFolders', 'prompt')
+    const parentFolders = gitConfig.get<'always' | 'never' | 'prompt'>('openRepositoryInParentFolders', 'prompt')
+    const depth = Math.max(0, vscode.workspace.getConfiguration('desktopView').get<number>('repositoryScanDepth', 4))
+    const ignored = new Set(['node_modules', ...gitConfig.get<string[]>('repositoryScanIgnoredFolders', [])])
     for (const folder of vscode.workspace.workspaceFolders ?? []) {
       try {
         const top = (await git(folder.uri.fsPath, ['rev-parse', '--show-toplevel'])).trim()
@@ -123,11 +125,24 @@ export class RepoRegistry implements vscode.Disposable {
         const folderPath = await fs.realpath(folder.uri.fsPath).catch(() => folder.uri.fsPath)
         const isParent = top !== '' && !sameFsPath(normalizeRoot(top), normalizeRoot(folderPath))
         if (top && (!isParent || parentFolders === 'always')) {
-          this.fallbackRoots.add(normalizeRoot(top))
+          found.add(normalizeRoot(top))
         }
       } catch {
         // not a repository
       }
+      // The git extension only looks one level down by default (git.repositoryScanMaxDepth).
+      await findRepositories(folder.uri.fsPath, depth, ignored, found)
+    }
+    this.fallbackRoots.clear()
+    found.forEach(r => this.fallbackRoots.add(r))
+  }
+
+  /** Picks up repositories cloned into the workspace since the last scan. */
+  async rescan(): Promise<void> {
+    const before = this.roots.join('\n')
+    await this.scanWorkspaceFolders()
+    if (this.roots.join('\n') !== before) {
+      this.onDidChangeReposEmitter.fire()
     }
   }
 
@@ -172,6 +187,7 @@ export class RepoRegistry implements vscode.Disposable {
     return {
       root,
       name: path.basename(root),
+      qualifier: repositoryQualifiers(this.roots).get(root),
       branch: await getCurrentBranch(root),
       github: await github,
     }
@@ -190,5 +206,45 @@ export class RepoRegistry implements vscode.Disposable {
     this.repoListeners.forEach(d => d.dispose())
     this.onDidChangeReposEmitter.dispose()
     this.onDidChangeRepoStateEmitter.dispose()
+  }
+}
+
+/**
+ * Adds every repository below `dir`, up to `depth` levels down. Hidden and
+ * ignored folders are skipped, and so are the insides of a repository found
+ * below the starting folder (its submodules are the git extension's business).
+ */
+async function findRepositories(dir: string, depth: number, ignored: Set<string>, found: Set<string>) {
+  if (depth <= 0) {
+    return
+  }
+  let entries: import('fs').Dirent[]
+  try {
+    entries = await fs.readdir(dir, { withFileTypes: true })
+  } catch {
+    return
+  }
+  await Promise.all(
+    entries
+      // Symbolic links are not followed: they could loop.
+      .filter(e => e.isDirectory() && !e.name.startsWith('.') && !ignored.has(e.name))
+      .map(async e => {
+        const child = path.join(dir, e.name)
+        if (await isRepositoryRoot(child)) {
+          found.add(normalizeRoot(child))
+        } else {
+          await findRepositories(child, depth - 1, ignored, found)
+        }
+      })
+  )
+}
+
+/** A `.git` folder, or a `.git` file for worktrees and submodules. */
+async function isRepositoryRoot(dir: string): Promise<boolean> {
+  try {
+    await fs.stat(path.join(dir, '.git'))
+    return true
+  } catch {
+    return false
   }
 }

@@ -3,6 +3,8 @@
 export interface RepoInfo {
   root: string
   name: string
+  /** Parent folder(s) telling this repository apart from others with the same name. */
+  qualifier?: string
   branch: string | null
   /** owner/name when the repository has a github.com remote. */
   github: GitHubRepoRef | null
@@ -106,6 +108,8 @@ export interface SyncStatus {
   behind: number
   /** When FETCH_HEAD was last written, in milliseconds. */
   lastFetched: number | null
+  /** HEAD, when Undo can take it back: a local-only, non-merge commit. */
+  undoable: { sha: string; summary: string; date: number } | null
 }
 
 export type SyncAction = 'fetch' | 'pull' | 'push' | 'publish'
@@ -162,6 +166,7 @@ export type WebviewToHost =
   | { type: 'signInGitHub' }
   | { type: 'openDiffInEditor'; source: DiffSource; file: ChangedFile }
   | { type: 'openFile'; path: string }
+  | { type: 'openTerminal' }
   | { type: 'openExternal'; url: string }
   | { type: 'copy'; text: string }
 

@@ -225,6 +225,11 @@ select:focus {
   background: var(--dv-hover-bg);
 }
 
+.repo-qualifier {
+  font-weight: normal;
+  color: var(--dv-fg-muted);
+}
+
 .repo-row.current .repo-name {
   font-weight: 600;
 }

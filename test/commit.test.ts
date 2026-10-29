@@ -4,6 +4,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { repositoryQualifiers } from '../src/repo-names'
 import { buildDiscardPatch, buildPartialPatch, lineKey, parseDiff, selectableKeys } from '../src/diff-parser'
 import {
   canUndoLastCommit,
@@ -273,7 +274,7 @@ test('lists, validates, creates, switches, renames and deletes branches', async 
 test('sync status counts ahead/behind and remote branches check out as tracking branches', async () => {
   let status = await getSyncStatus(repo)
   assert.deepEqual({ ...status, lastFetched: null }, {
-    remote: null, branch: 'main', upstream: null, ahead: 0, behind: 0, lastFetched: null,
+    remote: null, branch: 'main', upstream: null, ahead: 0, behind: 0, lastFetched: null, undoable: null,
   })
 
   const remote = join(base, 'remote.git')
@@ -329,4 +330,39 @@ test('history marks the commits the remote does not have yet', async () => {
   r('checkout', '-q', '-b', 'feature')
   r('commit', '-q', '--allow-empty', '-m', 'Feature')
   assert.deepEqual(await flags(), ['Feature:true', 'Third:false', 'Second:false', 'Initial:false'])
+})
+
+test('repositories with the same folder name are told apart by their parent folders', () => {
+  const q = repositoryQualifiers([
+    '/w/repos/core',
+    '/w/cards/_fechados/merge-bots/core',
+    '/w/cards/login-2fa/site',
+    '/w/cards/authfix/site',
+    '/w/a/x/game',
+    '/w/b/x/game',
+    '/w/repos/luna',
+  ])
+  assert.deepEqual(Object.fromEntries(q), {
+    '/w/repos/core': 'repos',
+    '/w/cards/_fechados/merge-bots/core': 'merge-bots',
+    '/w/cards/login-2fa/site': 'login-2fa',
+    '/w/cards/authfix/site': 'authfix',
+    '/w/a/x/game': 'a/x',
+    '/w/b/x/game': 'b/x',
+  })
+})
+
+test('sync status offers Undo only for a local, non-merge HEAD commit', async () => {
+  // The first commit has no parent to go back to.
+  assert.equal((await getSyncStatus(repo)).undoable, null)
+  write('b.txt', 'second\n')
+  r('commit', '-qam', 'Second')
+  const undoable = (await getSyncStatus(repo)).undoable
+  assert.equal(undoable?.summary, 'Second')
+  assert.equal(undoable?.sha, r('rev-parse', 'HEAD').trim())
+
+  run(base, 'init', '-q', '--bare', '-b', 'main', 'remote.git')
+  r('remote', 'add', 'origin', join(base, 'remote.git'))
+  r('push', '-q', '-u', 'origin', 'main')
+  assert.equal((await getSyncStatus(repo)).undoable, null)
 })

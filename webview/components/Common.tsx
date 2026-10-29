@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { ChangedFile, FileStatus } from '../../src/protocol'
 import { splitPath } from '../format'
 
@@ -141,4 +141,13 @@ export function Placeholder(props: { icon?: string; children: React.ReactNode })
       <div>{props.children}</div>
     </div>
   )
+}
+
+/** Re-renders every minute so relative times ("Last fetched …") stay current. */
+export function useMinuteTick() {
+  const [, setTick] = useState(0)
+  useEffect(() => {
+    const timer = setInterval(() => setTick(t => t + 1), 60_000)
+    return () => clearInterval(timer)
+  }, [])
 }

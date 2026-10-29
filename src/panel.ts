@@ -34,6 +34,7 @@ import {
 } from './git'
 import { GitHubClient } from './github'
 import { ChangedFile, DiffSource, HostToWebview, RepoInfo, SyncAction, SyncStatus, WebviewToHost } from './protocol'
+import { repositoryQualifiers } from './repo-names'
 import { RepoRegistry } from './repos'
 
 export const ViewType = 'desktopView'
@@ -183,8 +184,13 @@ export class DesktopViewPanel implements vscode.Disposable {
     return this.root
   }
 
+  private displayName() {
+    const qualifier = repositoryQualifiers(this.deps.repos.roots).get(this.root)
+    return qualifier ? `${path.basename(this.root)} (${qualifier})` : path.basename(this.root)
+  }
+
   private updateTitle() {
-    this.panel.title = path.basename(this.root)
+    this.panel.title = this.displayName()
   }
 
   private post(message: HostToWebview) {
@@ -220,6 +226,7 @@ export class DesktopViewPanel implements vscode.Disposable {
     const repos = await this.deps.repos.describeAll()
     const current = repos.find(r => r.root === this.root) ?? (await this.deps.repos.describe(this.root))
     this.post({ type: 'repos', repos, current })
+    this.updateTitle()
   }
 
   private async currentRepo(): Promise<RepoInfo> {
@@ -253,6 +260,7 @@ export class DesktopViewPanel implements vscode.Disposable {
     const root = this.root
     switch (message.type) {
       case 'ready': {
+        void this.deps.repos.rescan()
         await this.rememberHead()
         const repos = await this.deps.repos.describeAll()
         const current = repos.find(r => r.root === root) ?? (await this.currentRepo())
@@ -431,6 +439,9 @@ export class DesktopViewPanel implements vscode.Disposable {
         return
       case 'openFile':
         await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(path.join(root, message.path)))
+        return
+      case 'openTerminal':
+        openTerminal(root, this.displayName())
         return
       case 'openExternal':
         await vscode.env.openExternal(vscode.Uri.parse(message.url))
@@ -691,6 +702,18 @@ export async function runSync(deps: PanelDeps, root: string, action: SyncAction,
       }
       return repo ? repo.push(remote, branch, true) : git(root, ['push', '--quiet', '--set-upstream', remote, branch])
   }
+}
+
+const terminals = new Map<string, vscode.Terminal>()
+
+/** VS Code's integrated terminal in the repository folder, reusing the one opened before. */
+export function openTerminal(root: string, name: string) {
+  let terminal = terminals.get(root)
+  if (!terminal || terminal.exitStatus !== undefined || !vscode.window.terminals.includes(terminal)) {
+    terminal = vscode.window.createTerminal({ name, cwd: root })
+    terminals.set(root, terminal)
+  }
+  terminal.show()
 }
 
 /** Reverts the selected lines of a file after confirmation. Returns whether it did. */

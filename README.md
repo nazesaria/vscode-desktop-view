@@ -33,6 +33,7 @@ Each repository opens in its own editor tab. Open one with:
 - **Desktop View: Open Repository...**
 - the button in the Source Control view title, or on each repository in it
 - the **Desktop View** status bar item
+- the **Desktop View** icon in the activity bar, which lists the repositories
 
 Inside a tab, the "Current repository" dropdown switches repository (Ctrl+Click or the split icon opens it in a new tab).
 

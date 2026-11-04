@@ -13,6 +13,7 @@ mkdirSync('dist', { recursive: true })
 copyFileSync('node_modules/@vscode/codicons/dist/codicon.css', 'dist/codicon.css')
 copyFileSync('node_modules/@vscode/codicons/dist/codicon.ttf', 'dist/codicon.ttf')
 copyFileSync('media/icon.svg', 'dist/icon.svg')
+copyFileSync('media/activity-bar.svg', 'dist/activity-bar.svg')
 
 const common = {
   bundle: true,

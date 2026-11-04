@@ -2,7 +2,7 @@
   "name": "desktop-view",
   "displayName": "Desktop View",
   "description": "GitHub Desktop style history, changes and pull request viewer for the repositories in your workspace.",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "publisher": "nazesaria",
   "license": "MIT",
   "repository": {
@@ -27,7 +27,37 @@
     "vscode.git"
   ],
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "desktopView",
+          "title": "Desktop View",
+          "icon": "dist/activity-bar.svg"
+        }
+      ]
+    },
+    "views": {
+      "desktopView": [
+        {
+          "id": "desktopView.repositories",
+          "name": "Repositories",
+          "icon": "dist/activity-bar.svg"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "desktopView.repositories",
+        "contents": "No git repositories found in this workspace."
+      }
+    ],
     "commands": [
+      {
+        "command": "desktopView.refreshRepositories",
+        "title": "Refresh Repositories",
+        "category": "Desktop View",
+        "icon": "$(refresh)"
+      },
       {
         "command": "desktopView.open",
         "title": "Open Repository...",
@@ -138,6 +168,13 @@
       }
     ],
     "menus": {
+      "view/title": [
+        {
+          "command": "desktopView.refreshRepositories",
+          "when": "view == desktopView.repositories",
+          "group": "navigation"
+        }
+      ],
       "scm/title": [
         {
           "command": "desktopView.openCurrent",

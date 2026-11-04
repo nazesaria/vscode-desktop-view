@@ -19,6 +19,7 @@ import {
 } from './panel'
 import { ChangedFile, DiffSource } from './protocol'
 import { repositoryQualifiers } from './repo-names'
+import { RepositoriesViewId, RepositoryTree } from './repo-tree'
 import { RepoRegistry } from './repos'
 
 /** Payload attached to list items through `data-vscode-context` in the webview. */
@@ -98,6 +99,19 @@ export async function activate(context: vscode.ExtensionContext) {
     }
   })
   command('desktopView.signInGitHub', () => github.refreshSession(true))
+
+  // Activity bar icon. A container can't run a command by itself: it must show a view.
+  const repositoryTree = new RepositoryTree(repos)
+  const repositoryView = vscode.window.createTreeView(RepositoriesViewId, { treeDataProvider: repositoryTree })
+  context.subscriptions.push(
+    repositoryTree,
+    repositoryView,
+    repositoryView.onDidChangeVisibility(e => e.visible && void repos.rescan())
+  )
+  command('desktopView.refreshRepositories', async () => {
+    await repos.rescan()
+    repositoryTree.refresh()
+  })
 
   // Context menu entries contributed to `webview/context`.
   command('desktopView.ctx.copySha', (a: WebviewContextArgs) => a.sha && vscode.env.clipboard.writeText(a.sha))

@@ -274,7 +274,7 @@ test('lists, validates, creates, switches, renames and deletes branches', async 
 test('sync status counts ahead/behind and remote branches check out as tracking branches', async () => {
   let status = await getSyncStatus(repo)
   assert.deepEqual({ ...status, lastFetched: null }, {
-    remote: null, branch: 'main', upstream: null, ahead: 0, behind: 0, lastFetched: null, undoable: null,
+    remote: null, branch: 'main', upstream: null, ahead: 0, behind: 0, lastFetched: null, undoable: null, stashedAt: null,
   })
 
   const remote = join(base, 'remote.git')

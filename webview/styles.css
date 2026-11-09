@@ -597,6 +597,44 @@ body.resizing .resizer:hover {
   z-index: 30;
 }
 
+.failure-banner {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 8px 8px 12px;
+  background: var(--vscode-inputValidation-errorBackground, #5a1d1d);
+  border-bottom: 1px solid var(--vscode-inputValidation-errorBorder, #be1100);
+  border-left: 4px solid var(--vscode-errorForeground, #f85149);
+}
+
+.failure-banner > .codicon {
+  color: var(--vscode-errorForeground, #f85149);
+  margin-top: 1px;
+}
+
+.failure-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.failure-message {
+  margin: 4px 0 0;
+  max-height: 160px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 12px;
+}
+
+.failure-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
 .signin-banner {
   display: flex;
   align-items: center;
@@ -1418,18 +1456,6 @@ body.vscode-light .hljs-tag {
 .diff-table .ln.selectable.included {
   background: color-mix(in srgb, var(--dv-focus) 45%, transparent);
   color: var(--vscode-button-foreground, #fff);
-}
-
-.diff-table tr.selectable.excluded .code,
-.diff-table tr.selectable.excluded .marker,
-.diff-table .code.selectable.excluded {
-  background: transparent;
-  opacity: 0.55;
-}
-
-.diff-table tr.selectable.excluded .ln,
-.diff-table .ln.selectable.excluded {
-  background: var(--diff-gutter-bg);
 }
 
 .diff-table tr.selectable:hover .ln,

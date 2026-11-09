@@ -29,6 +29,8 @@ export interface GitOptions {
   env?: Record<string, string>
   /** Written to stdin. */
   input?: string
+  /** Leaves out --literal-pathspecs, for commands that break with it. */
+  magicPathspecs?: boolean
 }
 
 let gitPath = 'git'
@@ -44,7 +46,7 @@ export function git(cwd: string, args: string[], options: GitOptions = {}): Prom
     const child = execFile(
       gitPath,
       // Paths are passed verbatim; never let git expand them as globs.
-      ['-c', 'core.quotepath=false', '-c', 'color.ui=false', '--literal-pathspecs', ...args],
+      ['-c', 'core.quotepath=false', '-c', 'color.ui=false', ...(options.magicPathspecs ? [] : ['--literal-pathspecs']), ...args],
       {
         cwd,
         maxBuffer: 256 * 1024 * 1024,
@@ -768,6 +770,7 @@ export async function getSyncStatus(root: string): Promise<SyncStatus> {
     behind,
     lastFetched,
     undoable: await getUndoableCommit(root),
+    stashedAt: (await findPullStash(root))?.date ?? null,
   }
 }
 
@@ -777,4 +780,66 @@ async function getUndoableCommit(root: string): Promise<SyncStatus['undoable']> 
   }
   const [sha, date, summary] = (await git(root, ['log', '-1', '--format=%H%x1f%ct%x1f%s', 'HEAD'])).trim().split('\x1f')
   return { sha, summary, date: Number(date) * 1000 }
+}
+
+// ---------------------------------------------------------------------------
+// Stash
+
+const PullStashMessage = 'Desktop View: stashed before pull'
+
+/** Whether a failed pull would go through once the local changes are out of the way. */
+export function isBlockedByLocalChanges(error: string): boolean {
+  return /would be overwritten by|cannot pull with rebase/i.test(error)
+}
+
+export interface PullStash {
+  /** Position in the stash list; only valid until the list changes. */
+  index: number
+  branch: string
+  date: number
+}
+
+/** Parses `git stash list --format=%gs%x1f%ct`, keeping only the stashes made by "Stash and Pull". */
+export function parsePullStashes(output: string): PullStash[] {
+  const stashes: PullStash[] = []
+  output
+    .split('\n')
+    .filter(Boolean)
+    .forEach((line, index) => {
+      const [subject, date] = line.split('\x1f')
+      if (subject.endsWith(`: ${PullStashMessage}`) && subject.startsWith('On ')) {
+        stashes.push({ index, branch: subject.slice(3, -PullStashMessage.length - 2), date: Number(date) * 1000 })
+      }
+    })
+  return stashes
+}
+
+/** The newest "Stash and Pull" stash of the current branch. */
+async function findPullStash(root: string): Promise<PullStash | null> {
+  const branch = await getCurrentBranch(root)
+  const output = await git(root, ['stash', 'list', '--format=%gs%x1f%ct'])
+  return parsePullStashes(output).find(s => s.branch === branch) ?? null
+}
+
+/** Saves tracked and untracked changes so that a pull can run. */
+export async function stashForPull(root: string): Promise<void> {
+  // With --literal-pathspecs, git saves untracked files but fails to remove them.
+  await git(root, ['stash', 'push', '--include-untracked', '-m', PullStashMessage], { magicPathspecs: true })
+}
+
+async function runOnPullStash(root: string, command: 'pop' | 'drop'): Promise<void> {
+  const stash = await findPullStash(root)
+  if (!stash) {
+    throw new Error('There are no stashed changes for this branch.')
+  }
+  await git(root, ['stash', command, '--quiet', `stash@{${stash.index}}`])
+}
+
+/** Puts the stashed changes back. On a conflict git keeps the stash and this rejects. */
+export function restorePullStash(root: string): Promise<void> {
+  return runOnPullStash(root, 'pop')
+}
+
+export function dropPullStash(root: string): Promise<void> {
+  return runOnPullStash(root, 'drop')
 }

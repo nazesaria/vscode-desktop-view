@@ -2,7 +2,7 @@
   "name": "desktop-view",
   "displayName": "Desktop View",
   "description": "GitHub Desktop style history, changes and pull request viewer for the repositories in your workspace.",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "publisher": "nazesaria",
   "license": "MIT",
   "repository": {

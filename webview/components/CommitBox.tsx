@@ -64,6 +64,24 @@ export function CommitBox(props: CommitBoxProps) {
   )
 }
 
+export function StashBar(props: { date: number; onRestore: () => void; onDiscard: () => void }) {
+  useMinuteTick()
+  return (
+    <div className="undo-bar">
+      <div className="undo-text">
+        <span className="undo-label">Stashed: {relativeTime(props.date)}</span>
+        <span className="ellipsis">Changes saved before pull</span>
+      </div>
+      <button className="secondary-button" onClick={props.onRestore}>
+        Restore
+      </button>
+      <button className="secondary-button" onClick={props.onDiscard}>
+        Discard
+      </button>
+    </div>
+  )
+}
+
 export function UndoBar(props: { summary: string; date: number; onUndo: () => void }) {
   useMinuteTick()
   return (

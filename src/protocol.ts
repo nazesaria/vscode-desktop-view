@@ -110,6 +110,8 @@ export interface SyncStatus {
   lastFetched: number | null
   /** HEAD, when Undo can take it back: a local-only, non-merge commit. */
   undoable: { sha: string; summary: string; date: number } | null
+  /** When the changes stashed by "Stash and Pull" on this branch were saved, in milliseconds. */
+  stashedAt: number | null
 }
 
 export type SyncAction = 'fetch' | 'pull' | 'push' | 'publish'
@@ -160,6 +162,9 @@ export type WebviewToHost =
   | { type: 'createBranch' }
   | { type: 'loadSyncStatus' }
   | { type: 'sync'; action: SyncAction }
+  | { type: 'stashAndPull' }
+  | { type: 'restoreStash' }
+  | { type: 'discardStash' }
   | { type: 'loadPullRequests'; state: 'open' | 'closed'; page: number }
   | { type: 'loadPullRequest'; number: number }
   | { type: 'loadPullRequestCommitFiles'; number: number; sha: string }
@@ -183,6 +188,8 @@ export type HostToWebview =
   | { type: 'setIncluded'; paths: string[]; include: boolean }
   /** A push/pull/fetch started (action) or finished (null). */
   | { type: 'syncing'; action: SyncAction | null }
+  /** A sync or stash action failed; `canStash` offers to stash the changes and pull again. */
+  | { type: 'operationFailed'; title: string; message: string; canStash: boolean }
   | { type: 'commitFiles'; sha: string; oldestSha?: string; files: ChangedFile[] }
   | { type: 'changes'; files: ChangedFile[] }
   | { type: 'diff'; requestId: number; result: DiffResult }

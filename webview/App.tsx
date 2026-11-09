@@ -11,8 +11,9 @@ import {
   RepoInfo,
   SyncAction,
   SyncStatus,
+  DiffResult,
 } from '../src/protocol'
-import { CommitBox, UndoBar } from './components/CommitBox'
+import { CommitBox, StashBar, UndoBar } from './components/CommitBox'
 import { Avatar, Icon, Loading, Placeholder, Resizer } from './components/Common'
 import { ContextSource, DiffOptions, DiffState, DiffView, LineSelection } from './components/DiffView'
 import { CheckState, FileChecks, FileList } from './components/FileList'
@@ -54,6 +55,10 @@ const LineSelectableStatuses = new Set(['modified', 'untracked', 'added'])
 /** Statuses whose diff hides unchanged lines that can be expanded. */
 const ExpandableStatuses = new Set(['modified', 'renamed', 'typechange', 'copied'])
 
+function sameDiff(a: DiffResult, b: DiffResult): boolean {
+  return a.text === b.text && a.binary === b.binary && a.tooLarge === b.tooLarge && a.message === b.message
+}
+
 function splitContent(text: string): string[] {
   const lines = text.split('\n').map(l => (l.endsWith('\r') ? l.slice(0, -1) : l))
   if (lines.length > 0 && lines[lines.length - 1] === '') {
@@ -80,6 +85,7 @@ export function App() {
     hideWhitespace: persisted.hideWhitespace ?? false,
   })
   const [error, setError] = useState<string | null>(null)
+  const [failure, setFailure] = useState<{ title: string; message: string; canStash: boolean } | null>(null)
   const [branchList, setBranchList] = useState<BranchInfo[] | null>(null)
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null)
   const [syncing, setSyncing] = useState<SyncAction | null>(null)
@@ -129,6 +135,7 @@ export function App() {
   // Diff
   const [diff, setDiff] = useState<DiffState | null>(null)
   const [diffRefresh, setDiffRefresh] = useState(0)
+  const shownDiffKey = useRef('')
   const diffRequestId = useRef(0)
   const [contextLines, setContextLines] = useState<{ key: string; lines: string[] | null } | null>(null)
   const contentRequest = useRef({ id: 0, key: '' })
@@ -239,6 +246,7 @@ export function App() {
             setDescription('')
           }
           resetForRepo()
+          setFailure(null)
           setRepos(m.repos)
           setRepo(m.current)
           saveState({ root: m.current.root })
@@ -293,10 +301,16 @@ export function App() {
         }
         case 'syncing':
           setSyncing(m.action)
+          if (m.action) {
+            setFailure(null)
+          }
           if (m.action === 'push' || m.action === 'publish') {
             // A pushed commit can no longer be undone.
             setLastCommit(null)
           }
+          return
+        case 'operationFailed':
+          setFailure({ title: m.title, message: m.message, canStash: m.canStash })
           return
         case 'commitFiles':
           if (`${m.sha}:${m.oldestSha ?? ''}` === live.current.commitKey) {
@@ -325,7 +339,8 @@ export function App() {
           return
         case 'diff':
           if (m.requestId === diffRequestId.current) {
-            setDiff({ status: 'loaded', result: m.result })
+            // Keeping the same object on an unchanged diff preserves expanded context and avoids re-rendering.
+            setDiff(prev => (prev?.status === 'loaded' && sameDiff(prev.result, m.result) ? prev : { status: 'loaded', result: m.result }))
           }
           return
         case 'pullRequests':
@@ -576,6 +591,8 @@ export function App() {
     : ''
 
   useEffect(() => {
+    const sameTarget = shownDiffKey.current === targetKey
+    shownDiffKey.current = targetKey
     if (!target) {
       setDiff(null)
       return
@@ -598,7 +615,10 @@ export function App() {
       })
       return
     }
-    setDiff({ status: 'loading' })
+    // A refresh of the same file keeps the current diff on screen until the new one arrives.
+    if (!sameTarget) {
+      setDiff({ status: 'loading' })
+    }
     const { patch, ...file } = target.file
     post({ type: 'loadDiff', requestId, request: { source: target.source, file, hideWhitespace: diffOptions.hideWhitespace } })
   }, [targetKey, diffRefresh])
@@ -733,7 +753,7 @@ export function App() {
   // ---------------------------------------------------------------------------
   // Context expansion
 
-  const contextKey = `${targetKey}:${diffRefresh}`
+  const contextKey = `${targetKey}:${diff?.status === 'loaded' ? diff.result.text : ''}`
   const contextRef = !target
     ? null
     : target.source.kind === 'working'
@@ -827,6 +847,26 @@ export function App() {
         sync={syncStatus}
         syncing={syncing}
       />
+      {failure ? (
+        <div className="failure-banner" role="alert">
+          <Icon name="error" />
+          <div className="failure-body">
+            <strong>{failure.title}</strong>
+            <pre className="failure-message">{failure.message}</pre>
+            {failure.canStash ? (
+              <div className="failure-actions">
+                <button className="secondary-button" disabled={syncing !== null} onClick={() => post({ type: 'stashAndPull' })}>
+                  Stash Changes and Pull
+                </button>
+                <span>You can restore them from the Changes tab afterwards.</span>
+              </div>
+            ) : null}
+          </div>
+          <button className="icon-button" onClick={() => setFailure(null)} title="Dismiss">
+            <Icon name="close" />
+          </button>
+        </div>
+      ) : null}
       <div className="main">
         <div className="sidebar" style={{ width: sidebarWidth }}>
           <div className="tabs" role="tablist">
@@ -865,6 +905,16 @@ export function App() {
                   header={`${changes.length} changed file${changes.length === 1 ? '' : 's'}`}
                   checks={fileChecks}
                 />
+                {syncStatus?.stashedAt ? (
+                  <StashBar
+                    date={syncStatus.stashedAt}
+                    onRestore={() => {
+                      setFailure(null)
+                      post({ type: 'restoreStash' })
+                    }}
+                    onDiscard={() => post({ type: 'discardStash' })}
+                  />
+                ) : null}
                 {lastCommit ? <UndoBar summary={lastCommit.summary} date={lastCommit.date} onUndo={() => post({ type: 'undoLastCommit' })} /> : null}
                 <CommitBox
                   summary={summary}

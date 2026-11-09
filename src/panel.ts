@@ -21,7 +21,11 @@ import {
   getFileContent,
   getHeadSha,
   getHistory,
+  dropPullStash,
   getSyncStatus,
+  isBlockedByLocalChanges,
+  restorePullStash,
+  stashForPull,
   getWorkingChanges,
   getWorkingDiff,
   git,
@@ -212,6 +216,26 @@ export class DesktopViewPanel implements vscode.Disposable {
       }
       await this.sendSyncStatus()
     }, 400)
+  }
+
+  /** Runs a push/pull/fetch, showing a failure in the panel's banner. */
+  private async syncTask(action: SyncAction, task: () => Promise<unknown>) {
+    this.post({ type: 'syncing', action })
+    try {
+      await task()
+    } catch (e) {
+      const message = gitErrorText(e)
+      this.post({
+        type: 'operationFailed',
+        title: `${action[0].toUpperCase()}${action.slice(1)} failed`,
+        message,
+        canStash: action === 'pull' && isBlockedByLocalChanges(message),
+      })
+    } finally {
+      this.post({ type: 'syncing', action: null })
+      await this.sendSyncStatus()
+      this.scheduleRefresh()
+    }
   }
 
   private async sendSyncStatus() {
@@ -423,17 +447,35 @@ export class DesktopViewPanel implements vscode.Disposable {
         await this.sendSyncStatus()
         return
       case 'sync':
-        this.post({ type: 'syncing', action: message.action })
+        await this.syncTask(message.action, async () => runSync(this.deps, root, message.action, await getSyncStatus(root)))
+        return
+      case 'stashAndPull':
+        await this.syncTask('pull', async () => {
+          await stashForPull(root)
+          await runSync(this.deps, root, 'pull', await getSyncStatus(root))
+        })
+        return
+      case 'restoreStash':
         try {
-          await runSync(this.deps, root, message.action, await getSyncStatus(root))
+          await restorePullStash(root)
         } catch (e) {
-          void vscode.window.showErrorMessage(gitErrorText(e))
-        } finally {
-          this.post({ type: 'syncing', action: null })
+          this.post({ type: 'operationFailed', title: 'Could not restore the stashed changes', message: gitErrorText(e), canStash: false })
+        }
+        await this.sendSyncStatus()
+        this.scheduleRefresh()
+        return
+      case 'discardStash': {
+        const choice = await vscode.window.showWarningMessage(
+          'Discard the stashed changes?',
+          { modal: true, detail: 'They cannot be recovered from Desktop View afterwards.' },
+          'Discard Stash'
+        )
+        if (choice === 'Discard Stash') {
+          await dropPullStash(root)
           await this.sendSyncStatus()
-          this.scheduleRefresh()
         }
         return
+      }
       case 'openDiffInEditor':
         await openDiffInEditor(this.deps, root, message.source, message.file)
         return
